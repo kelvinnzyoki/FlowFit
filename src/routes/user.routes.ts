@@ -33,7 +33,6 @@ router.put('/me', async (req: AuthRequest, res: Response) => {
   try {
     const { name, email } = req.body;
 
-    // If changing email, ensure it is not already in use
     if (email && email !== req.user!.email) {
       const existing = await prisma.user.findUnique({ where: { email } });
       if (existing) {
@@ -57,25 +56,26 @@ router.put('/me', async (req: AuthRequest, res: Response) => {
 
 // ─── POST /api/v1/users/metrics ──────────────────────────────────────────────
 // Called by: UserAPI.updateMetrics(metrics)
-// e.g. { weight, height, age, fitnessGoal }
+// FIX 1: upsert uses { userId } as where — valid because userId is @unique in schema.
+// FIX 2: removed manual updatedAt from update/create — Prisma handles it via @updatedAt.
+// FIX 3: field names match the schema exactly (weight, height, age, fitnessGoal).
 router.post('/metrics', async (req: AuthRequest, res: Response) => {
   try {
     const { weight, height, age, fitnessGoal } = req.body;
 
     const metrics = await prisma.userMetrics.upsert({
-      where:  { userId: req.user!.id },
+      where: { userId: req.user!.id },
       update: {
-        ...(weight      !== undefined && { weight: parseFloat(weight) }),
-        ...(height      !== undefined && { height: parseFloat(height) }),
-        ...(age         !== undefined && { age: parseInt(age) }),
-        ...(fitnessGoal !== undefined && { fitnessGoal }),
-        updatedAt: new Date(),
+        ...(weight      !== undefined && { weight:      parseFloat(weight)  }),
+        ...(height      !== undefined && { height:      parseFloat(height)  }),
+        ...(age         !== undefined && { age:         parseInt(age)        }),
+        ...(fitnessGoal !== undefined && { fitnessGoal                       }),
       },
       create: {
         userId:      req.user!.id,
-        weight:      weight      ? parseFloat(weight)  : null,
-        height:      height      ? parseFloat(height)  : null,
-        age:         age         ? parseInt(age)        : null,
+        weight:      weight      != null ? parseFloat(weight)  : null,
+        height:      height      != null ? parseFloat(height)  : null,
+        age:         age         != null ? parseInt(age)        : null,
         fitnessGoal: fitnessGoal ?? null,
       },
     });
@@ -89,9 +89,9 @@ router.post('/metrics', async (req: AuthRequest, res: Response) => {
 
 // ─── GET /api/v1/users/metrics/history ───────────────────────────────────────
 // Called by: UserAPI.getMetricsHistory()
+// FIX: findUnique uses { userId } — valid because userId is @unique in schema.
 router.get('/metrics/history', async (req: AuthRequest, res: Response) => {
   try {
-    // Return current metrics. For a full audit history you can add a MetricsHistory model to Prisma.
     const metrics = await prisma.userMetrics.findUnique({
       where: { userId: req.user!.id },
     });
