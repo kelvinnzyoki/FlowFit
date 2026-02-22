@@ -5,12 +5,12 @@ import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
 import logger, { morganStream } from './utils/logger.js';
-import routes from './routes';
+import routes from './routes/routes.js';
 import {
   errorHandler,
   notFoundHandler,
-} from './middleware/error.middleware';
-import { standardLimiter } from './middleware/rateLimiter';
+} from './middleware/error.middleware.js';
+import { standardLimiter } from './middleware/rateLimiter.js';
 import prisma from './config/db.js';
 import redis from './config/redis.js';
 
