@@ -1,9 +1,10 @@
 import 'dotenv/config'; 
+import express, { Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
-import logger, { morganStream } from './utils/logger';
+import logger, { morganStream } from './utils/logger.js';
 import routes from './routes';
 import {
   errorHandler,
@@ -41,7 +42,7 @@ app.use(
 // CORS - Cross-Origin Resource Sharing
 app.use(
   cors({
-    origin: config.corsOrigin,
+    origin: process.env.CORS_ORIGIN || '*',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -60,7 +61,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // HTTP request logger
-if (config.nodeEnv === 'development') {
+if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 } else {
   app.use(morgan('combined', { stream: morganStream }));
@@ -85,7 +86,7 @@ app.get('/health', async (req, res) => {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      environment: config.nodeEnv,
+      environment: process.env.NODE_ENV,
       database: 'connected',
       redis: 'connected',
     });
@@ -131,20 +132,13 @@ app.use(errorHandler);
 
 const startServer = async () => {
   try {
-    // Test database connection
-    await prisma.$connect();
-    logger.info('✅ Database connected successfully');
-
-    // Test Redis connection
-    await redis.ping();
-    logger.info('✅ Redis connected successfully');
-
+  
     // Start server
-    const server = app.listen(config.port, () => {
-      logger.info(`🚀 Server running on port ${config.port}`);
-      logger.info(`📦 Environment: ${config.nodeEnv}`);
-      logger.info(`🔗 API: http://localhost:${config.port}/api`);
-      logger.info(`💚 Health: http://localhost:${config.port}/health`);
+    const server = app.listen(process.env.PORT, () => {
+      logger.info(`🚀 Server running on PORT ${process.env.PORT}`);
+      logger.info(`📦 Environment: ${process.env.NODE_ENV}`);
+      logger.info(`🔗 API: http://localhost:${process.env.PORT}/api`);
+      logger.info(`💚 Health: http://localhost:${process.env.PORT}/health`);
     });
 
     // Graceful shutdown
