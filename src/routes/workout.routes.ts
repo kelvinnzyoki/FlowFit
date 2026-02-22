@@ -4,33 +4,50 @@ import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
-// All workout routes require authentication
 router.use(authenticate);
 
 // ─── GET /api/v1/workouts ────────────────────────────────────────────────────
 // Called by: WorkoutsAPI.getExercises(filters)
-// Supports query params: category, difficulty, muscle, limit, page
+// Supports: ?category=&difficulty=&muscle=&limit=&page=
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
-    const { category, difficulty, muscle, limit = '20', page = '1' } = req.query as Record<string, string>;
+    const {
+      category,
+      difficulty,
+      muscle,
+      limit = '20',
+      page  = '1',
+    } = req.query as Record<string, string>;
 
     const take = Math.min(parseInt(limit), 100);
     const skip = (parseInt(page) - 1) * take;
 
-    const where: Record<string, unknown> = {};
-    if (category)   where.category   = category;
-    if (difficulty) where.difficulty = difficulty;
+    // Build where filter only from fields that actually exist in the schema
+    const where: {
+      category?:    string;
+      difficulty?:  string;
+      muscleGroup?: string;
+    } = {};
+
+    if (category)   where.category    = category;
+    if (difficulty) where.difficulty  = difficulty;
     if (muscle)     where.muscleGroup = muscle;
 
     const [workouts, total] = await Promise.all([
+      // FIX: prisma.workout (lowercase) matches the Prisma generated client property
       prisma.workout.findMany({ where, take, skip, orderBy: { createdAt: 'desc' } }),
       prisma.workout.count({ where }),
     ]);
 
     res.status(200).json({
       success: true,
-      data: workouts,
-      meta: { total, page: parseInt(page), limit: take, pages: Math.ceil(total / take) },
+      data:    workouts,
+      meta: {
+        total,
+        page:  parseInt(page),
+        limit: take,
+        pages: Math.ceil(total / take),
+      },
     });
   } catch (error) {
     console.error('Get workouts error:', error);
@@ -38,9 +55,9 @@ router.get('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// ─── GET /api/v1/workouts/search ────────────────────────────────────────────
+// ─── GET /api/v1/workouts/search ─────────────────────────────────────────────
 // Called by: WorkoutsAPI.searchExercises(query)
-// IMPORTANT: this must be defined BEFORE /:id to avoid 'search' being treated as an id
+// MUST be defined before /:id so the literal "search" is not caught as an id param
 router.get('/search', async (req: AuthRequest, res: Response) => {
   try {
     const { q } = req.query as { q?: string };
@@ -69,11 +86,13 @@ router.get('/search', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// ─── GET /api/v1/workouts/:id ────────────────────────────────────────────────
+// ─── GET /api/v1/workouts/:id ─────────────────────────────────────────────────
 // Called by: WorkoutsAPI.getExerciseById(id)
 router.get('/:id', async (req: AuthRequest, res: Response) => {
   try {
-    const workout = await prisma.workout.findUnique({ where: { id: req.params.id } });
+    const workout = await prisma.workout.findUnique({
+      where: { id: req.params.id },
+    });
 
     if (!workout) {
       res.status(404).json({ success: false, error: 'Workout not found.' });
