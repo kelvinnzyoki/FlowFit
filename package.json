@@ -1,6 +1,7 @@
 {
   "name": "flowfit-backend",
   "version": "1.0.0",
+  "type": "module",
   "description": "Production-ready Node.js backend for FlowFit SaaS platform",
   "main": "dist/server.ts",
   "scripts": {
