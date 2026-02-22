@@ -1,9 +1,8 @@
-import express, { Application } from 'express';
+import 'dotenv/config'; 
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
-import config from './config/env';
 import logger, { morganStream } from './utils/logger';
 import routes from './routes';
 import {
