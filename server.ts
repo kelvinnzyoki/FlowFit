@@ -11,8 +11,8 @@ import {
   notFoundHandler,
 } from './middleware/error.middleware';
 import { standardLimiter } from './middleware/rateLimiter';
-import prisma from './config/db';
-import redis from './config/redis';
+import prisma from './config/db.js';
+import redis from './config/redis.js';
 
 // ============================================
 // CREATE EXPRESS APP
