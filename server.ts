@@ -5,7 +5,7 @@ import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
 import logger, { morganStream } from './utils/logger.js';
-import routes from './routes/routes.js';
+import routes from './routes/index.js';
 import {
   errorHandler,
   notFoundHandler,
