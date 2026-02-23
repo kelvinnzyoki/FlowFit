@@ -2,12 +2,17 @@
   "version": 2,
   "buildCommand": "npm run build",
   "installCommand": "npm install",
-  "outputDirectory": "dist",
   "framework": null,
-  "rewrites": [
+  "functions": {
+    "api/index.ts": {
+      "memory": 1024,
+      "maxDuration": 30
+    }
+  },
+  "routes": [
     {
-      "source": "/(.*)",
-      "destination": "dist/server.js"
+      "src": "/(.*)",
+      "dest": "api/index.ts"
     }
   ]
 }
