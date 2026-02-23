@@ -8,13 +8,15 @@ router.use(authenticate);
 
 // ─── GET /api/v1/workouts ────────────────────────────────────────────────────
 // Called by: WorkoutsAPI.getExercises(filters)
-// Supports: ?category=&difficulty=&muscle=&limit=&page=
+// Schema model: Exercise (not Workout — your schema uses Exercise for the library)
+// Supports: ?category=&difficulty=&muscle=&equipment=&limit=&page=
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const {
       category,
       difficulty,
       muscle,
+      equipment,
       limit = '20',
       page  = '1',
     } = req.query as Record<string, string>;
@@ -22,26 +24,21 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     const take = Math.min(parseInt(limit), 100);
     const skip = (parseInt(page) - 1) * take;
 
-    // Build where filter only from fields that actually exist in the schema
-    const where: {
-      category?:    string;
-      difficulty?:  string;
-      muscleGroup?: string;
-    } = {};
+    const where: Record<string, unknown> = { isActive: true };
+    if (category)   where.category   = category;
+    if (difficulty) where.difficulty = difficulty;
+    // targetMuscles and equipment are String[] arrays in the schema — use array contains filter
+    if (muscle)     where.targetMuscles = { has: muscle };
+    if (equipment)  where.equipment     = { has: equipment };
 
-    if (category)   where.category    = category;
-    if (difficulty) where.difficulty  = difficulty;
-    if (muscle)     where.muscleGroup = muscle;
-
-    const [workouts, total] = await Promise.all([
-      // FIX: prisma.workout (lowercase) matches the Prisma generated client property
-      prisma.workout.findMany({ where, take, skip, orderBy: { createdAt: 'desc' } }),
-      prisma.workout.count({ where }),
+    const [exercises, total] = await Promise.all([
+      prisma.exercise.findMany({ where, take, skip, orderBy: { name: 'asc' } }),
+      prisma.exercise.count({ where }),
     ]);
 
     res.status(200).json({
       success: true,
-      data:    workouts,
+      data:    exercises,
       meta: {
         total,
         page:  parseInt(page),
@@ -50,14 +47,14 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('Get workouts error:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch workouts.' });
+    console.error('Get exercises error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch exercises.' });
   }
 });
 
 // ─── GET /api/v1/workouts/search ─────────────────────────────────────────────
 // Called by: WorkoutsAPI.searchExercises(query)
-// MUST be defined before /:id so the literal "search" is not caught as an id param
+// Must be defined BEFORE /:id so "search" is not treated as an id
 router.get('/search', async (req: AuthRequest, res: Response) => {
   try {
     const { q } = req.query as { q?: string };
@@ -67,21 +64,21 @@ router.get('/search', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const workouts = await prisma.workout.findMany({
+    const exercises = await prisma.exercise.findMany({
       where: {
+        isActive: true,
         OR: [
           { name:        { contains: q, mode: 'insensitive' } },
           { description: { contains: q, mode: 'insensitive' } },
           { category:    { contains: q, mode: 'insensitive' } },
-          { muscleGroup: { contains: q, mode: 'insensitive' } },
         ],
       },
       take: 20,
     });
 
-    res.status(200).json({ success: true, data: workouts });
+    res.status(200).json({ success: true, data: exercises });
   } catch (error) {
-    console.error('Search workouts error:', error);
+    console.error('Search exercises error:', error);
     res.status(500).json({ success: false, error: 'Search failed.' });
   }
 });
@@ -90,19 +87,19 @@ router.get('/search', async (req: AuthRequest, res: Response) => {
 // Called by: WorkoutsAPI.getExerciseById(id)
 router.get('/:id', async (req: AuthRequest, res: Response) => {
   try {
-    const workout = await prisma.workout.findUnique({
+    const exercise = await prisma.exercise.findUnique({
       where: { id: req.params.id },
     });
 
-    if (!workout) {
-      res.status(404).json({ success: false, error: 'Workout not found.' });
+    if (!exercise || !exercise.isActive) {
+      res.status(404).json({ success: false, error: 'Exercise not found.' });
       return;
     }
 
-    res.status(200).json({ success: true, data: workout });
+    res.status(200).json({ success: true, data: exercise });
   } catch (error) {
-    console.error('Get workout by id error:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch workout.' });
+    console.error('Get exercise by id error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch exercise.' });
   }
 });
 
