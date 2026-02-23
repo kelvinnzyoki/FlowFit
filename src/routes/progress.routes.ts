@@ -1,3 +1,4 @@
+// Path: src/routes/progress.routes.ts
 import { Router, Response } from 'express';
 import prisma from '../config/db.js';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
@@ -8,27 +9,46 @@ router.use(authenticate);
 
 // ─── POST /api/v1/progress ───────────────────────────────────────────────────
 // Called by: ProgressAPI.logWorkout(workoutData)
+// Schema fields on WorkoutLog: exerciseId, duration, date, sets, reps,
+//   caloriesBurned, heartRate, difficulty, notes, completed
+// NOT: workoutId, completedAt — those don't exist in your schema
 router.post('/', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user!.id;
-    const { workoutId, duration, caloriesBurned, notes, completedAt } = req.body;
+    const {
+      exerciseId,
+      duration,
+      sets,
+      reps,
+      caloriesBurned,
+      heartRate,
+      difficulty,
+      notes,
+    } = req.body;
 
-    if (!workoutId || !duration) {
-      res.status(400).json({ success: false, error: 'workoutId and duration are required.' });
+    if (!exerciseId || !duration) {
+      res.status(400).json({ success: false, error: 'exerciseId and duration are required.' });
       return;
     }
 
     const log = await prisma.workoutLog.create({
       data: {
         userId,
-        workoutId,
+        exerciseId,
         duration:       parseInt(duration),
-        caloriesBurned: caloriesBurned ? parseInt(caloriesBurned) : null,
-        notes:          notes ?? null,
-        completedAt:    completedAt ? new Date(completedAt) : new Date(),
+        sets:           sets           ? parseInt(sets)             : null,
+        reps:           reps           ? parseInt(reps)             : null,
+        caloriesBurned: caloriesBurned ? parseFloat(caloriesBurned) : null,
+        heartRate:      heartRate      ? parseInt(heartRate)        : null,
+        difficulty:     difficulty     ?? null,
+        notes:          notes          ?? null,
+        // `date` defaults to now() per schema; `completed` defaults to true
       },
-      include: { workout: true },
+      include: { exercise: true }, // relation name is `exercise` per schema
     });
+
+    // Update the Streak model after every logged workout
+    await updateStreak(userId);
 
     res.status(201).json({ success: true, data: log });
   } catch (error) {
@@ -43,8 +63,8 @@ router.get('/me', async (req: AuthRequest, res: Response) => {
   try {
     const logs = await prisma.workoutLog.findMany({
       where:   { userId: req.user!.id },
-      include: { workout: true },
-      orderBy: { completedAt: 'desc' },
+      include: { exercise: true },   // `exercise` not `workout`
+      orderBy: { date: 'desc' },     // `date` not `completedAt`
       take:    50,
     });
 
@@ -56,43 +76,49 @@ router.get('/me', async (req: AuthRequest, res: Response) => {
 });
 
 // ─── GET /api/v1/progress/stats ──────────────────────────────────────────────
-// Called by: ProgressAPI.getStats(period) — period: '7d' | '30d' | '90d'
+// Called by: ProgressAPI.getStats(period) — ?period=7d|30d|90d
 router.get('/stats', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user!.id;
     const period = (req.query.period as string) || '30d';
-
-    const days  = period === '7d' ? 7 : period === '90d' ? 90 : 30;
-    const since = new Date();
+    const days   = period === '7d' ? 7 : period === '90d' ? 90 : 30;
+    const since  = new Date();
     since.setDate(since.getDate() - days);
 
     const logs = await prisma.workoutLog.findMany({
-      where: { userId, completedAt: { gte: since } },
-      include: { workout: true },
+      where: {
+        userId,
+        date: { gte: since },        // `date` is the timestamp field in your schema
+      },
+      include: {
+        exercise: {                   // `exercise` relation, not `workout`
+          select: { name: true, category: true, caloriesPerMin: true },
+        },
+      },
     });
 
-    const totalWorkouts  = logs.length;
-    const totalDuration  = logs.reduce((sum, l) => sum + l.duration, 0);
-    const totalCalories  = logs.reduce((sum, l) => sum + (l.caloriesBurned ?? 0), 0);
-    const avgDuration    = totalWorkouts ? Math.round(totalDuration / totalWorkouts) : 0;
+    const totalWorkouts = logs.length;
+    const totalDuration = logs.reduce((s, l) => s + l.duration, 0);
+    const totalCalories = logs.reduce((s, l) => s + (l.caloriesBurned ?? 0), 0);
+    const avgDuration   = totalWorkouts ? Math.round(totalDuration / totalWorkouts) : 0;
 
-    // Group by date for charting
+    // Group by date for weekly chart
     const byDate: Record<string, number> = {};
-    logs.forEach((log) => {
-      const date = log.completedAt.toISOString().split('T')[0];
-      byDate[date] = (byDate[date] || 0) + 1;
+    logs.forEach((l) => {
+      const d = l.date.toISOString().split('T')[0]; // `date` field not `completedAt`
+      byDate[d] = (byDate[d] || 0) + 1;
+    });
+
+    // Category breakdown
+    const byCategory: Record<string, number> = {};
+    logs.forEach((l) => {
+      const cat = l.exercise.category;
+      byCategory[cat] = (byCategory[cat] || 0) + 1;
     });
 
     res.status(200).json({
       success: true,
-      data: {
-        period,
-        totalWorkouts,
-        totalDuration,
-        totalCalories,
-        avgDuration,
-        byDate,
-      },
+      data: { period, totalWorkouts, totalDuration, totalCalories, avgDuration, byDate, byCategory },
     });
   } catch (error) {
     console.error('Get stats error:', error);
@@ -108,8 +134,8 @@ router.get('/history', async (req: AuthRequest, res: Response) => {
 
     const logs = await prisma.workoutLog.findMany({
       where:   { userId: req.user!.id },
-      include: { workout: true },
-      orderBy: { completedAt: 'desc' },
+      include: { exercise: true },   // `exercise` not `workout`
+      orderBy: { date: 'desc' },     // `date` not `completedAt`
       take:    limit,
     });
 
@@ -122,41 +148,20 @@ router.get('/history', async (req: AuthRequest, res: Response) => {
 
 // ─── GET /api/v1/progress/streaks ────────────────────────────────────────────
 // Called by: ProgressAPI.getStreaks()
+// Reads directly from the dedicated Streak model in your schema
 router.get('/streaks', async (req: AuthRequest, res: Response) => {
   try {
-    const logs = await prisma.workoutLog.findMany({
-      where:    { userId: req.user!.id },
-      select:   { completedAt: true },
-      orderBy:  { completedAt: 'desc' },
+    const streak = await prisma.streak.findUnique({
+      where: { userId: req.user!.id },
     });
-
-    // Build unique workout days (YYYY-MM-DD)
-    const days = [...new Set(logs.map((l) => l.completedAt.toISOString().split('T')[0]))].sort().reverse();
-
-    let currentStreak = 0;
-    let longestStreak = 0;
-    let streak        = 0;
-
-    for (let i = 0; i < days.length; i++) {
-      if (i === 0) {
-        streak = 1;
-      } else {
-        const prev = new Date(days[i - 1]);
-        const curr = new Date(days[i]);
-        const diff = (prev.getTime() - curr.getTime()) / (1000 * 60 * 60 * 24);
-        streak = diff === 1 ? streak + 1 : 1;
-      }
-      longestStreak  = Math.max(longestStreak, streak);
-      if (i === 0) currentStreak = streak;
-    }
 
     res.status(200).json({
       success: true,
-      data: { currentStreak, longestStreak, totalActiveDays: days.length },
+      data: streak ?? { currentStreak: 0, longestStreak: 0, lastWorkoutDate: null },
     });
   } catch (error) {
     console.error('Get streaks error:', error);
-    res.status(500).json({ success: false, error: 'Failed to calculate streaks.' });
+    res.status(500).json({ success: false, error: 'Failed to fetch streak.' });
   }
 });
 
@@ -166,37 +171,64 @@ router.get('/achievements', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user!.id;
 
-    const totalLogs = await prisma.workoutLog.count({ where: { userId } });
+    const [allAchievements, userAchievements] = await Promise.all([
+      prisma.achievement.findMany({ orderBy: { points: 'asc' } }),
+      prisma.userAchievement.findMany({
+        where:  { userId },
+        select: { achievementId: true, unlockedAt: true },
+      }),
+    ]);
 
-    // Compute streak for achievement check
-    const logs = await prisma.workoutLog.findMany({
-      where:   { userId },
-      select:  { completedAt: true },
-      orderBy: { completedAt: 'desc' },
-    });
-    const days  = [...new Set(logs.map((l) => l.completedAt.toISOString().split('T')[0]))].sort().reverse();
-    let streak  = 0;
-    for (let i = 0; i < days.length; i++) {
-      if (i === 0) { streak = 1; continue; }
-      const diff = (new Date(days[i - 1]).getTime() - new Date(days[i]).getTime()) / 86400000;
-      if (diff === 1) streak++; else break;
-    }
+    const unlockedMap = new Map(userAchievements.map((ua) => [ua.achievementId, ua.unlockedAt]));
 
-    // Rule-based achievements
-    const achievements = [
-      { id: 'first_workout',   name: 'First Step',     description: 'Completed your first workout',       icon: '🎯', unlocked: totalLogs >= 1   },
-      { id: 'week_warrior',    name: 'Week Warrior',   description: 'Worked out 7 days in a row',         icon: '🔥', unlocked: streak >= 7      },
-      { id: 'century_club',    name: 'Century Club',   description: 'Completed 100 total workouts',       icon: '💯', unlocked: totalLogs >= 100 },
-      { id: 'consistent_10',   name: 'Consistent',     description: 'Completed 10 workouts',              icon: '⚡', unlocked: totalLogs >= 10  },
-      { id: 'month_streak',    name: 'Month Warrior',  description: 'Worked out 30 days in a row',        icon: '🏆', unlocked: streak >= 30     },
-      { id: 'half_century',    name: 'Half Century',   description: 'Completed 50 workouts',              icon: '🌟', unlocked: totalLogs >= 50  },
-    ];
+    const data = allAchievements.map((a) => ({
+      ...a,
+      unlocked:   unlockedMap.has(a.id),
+      unlockedAt: unlockedMap.get(a.id) ?? null,
+    }));
 
-    res.status(200).json({ success: true, data: achievements });
+    res.status(200).json({ success: true, data });
   } catch (error) {
     console.error('Get achievements error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch achievements.' });
   }
 });
+
+// ─── Helper: update Streak model after each workout log ─────────────────────
+async function updateStreak(userId: string) {
+  try {
+    const today     = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const existing = await prisma.streak.findUnique({ where: { userId } });
+
+    if (!existing) {
+      await prisma.streak.create({
+        data: { userId, currentStreak: 1, longestStreak: 1, lastWorkoutDate: today },
+      });
+      return;
+    }
+
+    const last = existing.lastWorkoutDate ? new Date(existing.lastWorkoutDate) : null;
+    if (last) last.setHours(0, 0, 0, 0);
+
+    // Already logged today — no update needed
+    if (last && last.getTime() === today.getTime()) return;
+
+    const isConsecutive = last && last.getTime() === yesterday.getTime();
+    const newCurrent    = isConsecutive ? existing.currentStreak + 1 : 1;
+    const newLongest    = Math.max(existing.longestStreak, newCurrent);
+
+    await prisma.streak.update({
+      where: { userId },
+      data:  { currentStreak: newCurrent, longestStreak: newLongest, lastWorkoutDate: today },
+    });
+  } catch (err) {
+    // Non-fatal — streak failure should never block workout logging
+    console.error('Streak update failed:', err);
+  }
+}
 
 export default router;
