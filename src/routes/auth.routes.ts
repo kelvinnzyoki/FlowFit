@@ -2,12 +2,10 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/db.js';
-import redis from '../config/redis.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
+import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
 
 const router = Router();
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 const JWT_ACCESS_SECRET  = process.env.JWT_ACCESS_SECRET  || 'change_me_access';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'change_me_refresh';
@@ -15,22 +13,28 @@ const ACCESS_EXPIRES     = '15m';
 const REFRESH_EXPIRES    = '7d';
 
 function generateTokens(userId: string) {
-  const accessToken = jwt.sign({ userId }, JWT_ACCESS_SECRET, { expiresIn: ACCESS_EXPIRES });
+  const accessToken  = jwt.sign({ userId }, JWT_ACCESS_SECRET,  { expiresIn: ACCESS_EXPIRES });
   const refreshToken = jwt.sign({ userId }, JWT_REFRESH_SECRET, { expiresIn: REFRESH_EXPIRES });
   return { accessToken, refreshToken };
 }
 
-// Store refresh token in Redis (falls back to DB-only if Redis unavailable)
+// Store refresh token in DB using the RefreshToken model from the schema
 async function storeRefreshToken(userId: string, token: string) {
-  if (redis) {
-    await redis.set(`refresh:${userId}`, token, 'EX', 7 * 24 * 60 * 60);
-  }
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7);
+
+  await prisma.refreshToken.create({
+    data: { token, userId, expiresAt },
+  });
 }
 
-async function invalidateRefreshToken(userId: string) {
-  if (redis) {
-    await redis.del(`refresh:${userId}`);
-  }
+// Delete one specific refresh token (logout) or all for a user (password change)
+async function deleteRefreshToken(token: string) {
+  await prisma.refreshToken.deleteMany({ where: { token } });
+}
+
+async function deleteAllRefreshTokens(userId: string) {
+  await prisma.refreshToken.deleteMany({ where: { userId } });
 }
 
 // ─── POST /api/v1/auth/register ─────────────────────────────────────────────
@@ -57,9 +61,16 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const user = await prisma.user.create({
-      data: { name, email, password: hashedPassword },
-      select: { id: true, name: true, email: true, createdAt: true },
+    // Create user + empty Profile in a transaction so both always exist together
+    const user = await prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: { name, email, password: hashedPassword },
+        select: { id: true, name: true, email: true, role: true, createdAt: true },
+      });
+
+      await tx.profile.create({ data: { userId: newUser.id } });
+
+      return newUser;
     });
 
     const { accessToken, refreshToken } = generateTokens(user.id);
@@ -98,6 +109,12 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
       return;
     }
 
+    // Update lastLogin timestamp
+    await prisma.user.update({
+      where: { id: user.id },
+      data:  { lastLogin: new Date() },
+    });
+
     const { accessToken, refreshToken } = generateTokens(user.id);
     await storeRefreshToken(user.id, refreshToken);
 
@@ -114,19 +131,15 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
 });
 
 // ─── POST /api/v1/auth/logout ───────────────────────────────────────────────
-// Called by: AuthAPI.logout() — sends refreshToken in body
+// Called by: AuthAPI.logout() — sends { refreshToken } in body
 router.post('/logout', async (req: Request, res: Response) => {
   try {
     const { refreshToken } = req.body;
-
     if (refreshToken) {
-      const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET) as { userId: string };
-      await invalidateRefreshToken(decoded.userId);
+      await deleteRefreshToken(refreshToken);
     }
-
     res.status(200).json({ success: true, message: 'Logged out successfully.' });
   } catch {
-    // Even if token is invalid, logout should succeed from the client's perspective
     res.status(200).json({ success: true, message: 'Logged out successfully.' });
   }
 });
@@ -142,20 +155,19 @@ router.post('/refresh', async (req: Request, res: Response) => {
       return;
     }
 
+    // Verify signature first
     const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET) as { userId: string };
 
-    // Verify against stored token if Redis is available
-    if (redis) {
-      const stored = await redis.get(`refresh:${decoded.userId}`);
-      if (stored !== refreshToken) {
-        res.status(401).json({ success: false, error: 'Invalid or expired refresh token.' });
-        return;
-      }
+    // Then check it actually exists in DB and hasn't expired
+    const stored = await prisma.refreshToken.findUnique({ where: { token: refreshToken } });
+    if (!stored || stored.expiresAt < new Date()) {
+      res.status(401).json({ success: false, error: 'Invalid or expired refresh token.' });
+      return;
     }
 
     const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: { id: true, name: true, email: true },
+      where:  { id: decoded.userId },
+      select: { id: true, name: true, email: true, role: true },
     });
 
     if (!user) {
@@ -163,6 +175,8 @@ router.post('/refresh', async (req: Request, res: Response) => {
       return;
     }
 
+    // Rotate: delete old token, issue new pair
+    await deleteRefreshToken(refreshToken);
     const tokens = generateTokens(user.id);
     await storeRefreshToken(user.id, tokens.refreshToken);
 
@@ -177,20 +191,20 @@ router.post('/refresh', async (req: Request, res: Response) => {
 
 // ─── GET /api/v1/auth/me ────────────────────────────────────────────────────
 // Called by: AuthAPI.getCurrentUser() → checkAuth() in api.js
-router.get('/me', async (req: Request, res: Response) => {
+router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      res.status(401).json({ success: false, error: 'No token provided.' });
-      return;
-    }
-
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_ACCESS_SECRET) as { userId: string };
-
     const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: { id: true, name: true, email: true, createdAt: true },
+      where:  { id: req.user!.id },
+      select: {
+        id:              true,
+        name:            true,
+        email:           true,
+        role:            true,
+        isEmailVerified: true,
+        lastLogin:       true,
+        createdAt:       true,
+        profile:         true,
+      },
     });
 
     if (!user) {
@@ -199,25 +213,18 @@ router.get('/me', async (req: Request, res: Response) => {
     }
 
     res.status(200).json({ success: true, data: user });
-  } catch {
-    res.status(401).json({ success: false, error: 'Invalid or expired token.' });
+  } catch (error) {
+    console.error('Get current user error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch user.' });
   }
 });
 
 // ─── POST /api/v1/auth/change-password ──────────────────────────────────────
 // Called by: AuthAPI.changePassword()
-router.post('/change-password', async (req: Request, res: Response) => {
+router.post('/change-password', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      res.status(401).json({ success: false, error: 'No token provided.' });
-      return;
-    }
-
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_ACCESS_SECRET) as { userId: string };
-
     const { currentPassword, newPassword } = req.body;
+
     if (!currentPassword || !newPassword) {
       res.status(400).json({ success: false, error: 'Both current and new password are required.' });
       return;
@@ -228,7 +235,7 @@ router.post('/change-password', async (req: Request, res: Response) => {
       return;
     }
 
-    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
     if (!user) {
       res.status(404).json({ success: false, error: 'User not found.' });
       return;
@@ -241,17 +248,17 @@ router.post('/change-password', async (req: Request, res: Response) => {
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
-    await prisma.user.update({
-      where: { id: decoded.userId },
-      data: { password: hashedPassword },
-    });
 
-    // Invalidate all existing refresh tokens after password change
-    await invalidateRefreshToken(decoded.userId);
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: user.id }, data: { password: hashedPassword } }),
+      // Invalidate ALL existing sessions after a password change
+      prisma.refreshToken.deleteMany({ where: { userId: user.id } }),
+    ]);
 
-    res.status(200).json({ success: true, message: 'Password changed successfully.' });
-  } catch {
-    res.status(401).json({ success: false, error: 'Invalid or expired token.' });
+    res.status(200).json({ success: true, message: 'Password changed successfully. Please log in again.' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ success: false, error: 'Failed to change password.' });
   }
 });
 
