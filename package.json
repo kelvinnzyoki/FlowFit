@@ -6,8 +6,8 @@
   "main": "dist/src/server.js",
   "scripts": {
     "dev": "nodemon src/server.ts",
-    "build": "npx prisma generate && npx tsc",
-    "postinstall": "npx prisma generate",
+    "build": "npx prisma generate --schema=./prisma/schema.prisma && npx tsc",
+    "postinstall": "npx prisma generate --schema=./prisma/schema.prisma",
     "start": "node dist/src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
@@ -57,7 +57,7 @@
     "ts-node": "^10.9.2"
   },
   "engines": {
-    "node": "24.x",
+    "node": "20.x",
     "npm": ">=9.0.0"
   }
 }
