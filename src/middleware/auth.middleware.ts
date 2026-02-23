@@ -1,3 +1,4 @@
+// Path: src/middleware/auth.middleware.ts
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/db.js';
@@ -26,7 +27,7 @@ export const authenticate = async (
       return;
     }
 
-    const token = authHeader.split(' ')[1];
+    const token   = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, JWT_ACCESS_SECRET) as { userId: string };
 
     const user = await prisma.user.findUnique({
