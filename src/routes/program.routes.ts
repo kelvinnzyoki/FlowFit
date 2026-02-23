@@ -10,7 +10,13 @@ router.use(authenticate);
 // Called by: ProgramsAPI.getPrograms(filters)
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
-    const { difficulty, category, limit = '20', page = '1' } = req.query as Record<string, string>;
+    const {
+      difficulty,
+      category,
+      isPremium,
+      limit = '20',
+      page  = '1',
+    } = req.query as Record<string, string>;
 
     const take = Math.min(parseInt(limit), 100);
     const skip = (parseInt(page) - 1) * take;
@@ -18,16 +24,29 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     const where: Record<string, unknown> = {};
     if (difficulty) where.difficulty = difficulty;
     if (category)   where.category   = category;
+    if (isPremium !== undefined) where.isPremium = isPremium === 'true';
 
     const [programs, total] = await Promise.all([
-      prisma.program.findMany({ where, take, skip, orderBy: { createdAt: 'desc' } }),
+      prisma.program.findMany({
+        where,
+        take,
+        skip,
+        orderBy:  { createdAt: 'desc' },
+        // Include week count for display cards
+        include: { _count: { select: { weeks: true, enrollments: true } } },
+      }),
       prisma.program.count({ where }),
     ]);
 
     res.status(200).json({
       success: true,
-      data: programs,
-      meta: { total, page: parseInt(page), limit: take, pages: Math.ceil(total / take) },
+      data:    programs,
+      meta: {
+        total,
+        page:  parseInt(page),
+        limit: take,
+        pages: Math.ceil(total / take),
+      },
     });
   } catch (error) {
     console.error('Get programs error:', error);
@@ -35,15 +54,19 @@ router.get('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// ─── GET /api/v1/programs/my-enrollments ────────────────────────────────────
+// ─── GET /api/v1/programs/my-enrollments ─────────────────────────────────────
 // Called by: ProgramsAPI.getUserPrograms()
-// IMPORTANT: defined before /:id so 'my-enrollments' is not treated as an id
+// Must be defined BEFORE /:id
 router.get('/my-enrollments', async (req: AuthRequest, res: Response) => {
   try {
-    const enrollments = await prisma.enrollment.findMany({
-      where: { userId: req.user!.id },
-      include: { program: true },
-      orderBy: { enrolledAt: 'desc' },
+    const enrollments = await prisma.programEnrollment.findMany({
+      where:   { userId: req.user!.id },
+      include: {
+        program: {
+          include: { _count: { select: { weeks: true } } },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
     });
 
     res.status(200).json({ success: true, data: enrollments });
@@ -53,13 +76,29 @@ router.get('/my-enrollments', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// ─── GET /api/v1/programs/:id ────────────────────────────────────────────────
+// ─── GET /api/v1/programs/:id ─────────────────────────────────────────────────
 // Called by: ProgramsAPI.getProgramById(id)
+// Returns the full nested structure: program → weeks → days → exercises
 router.get('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const program = await prisma.program.findUnique({
-      where: { id: req.params.id },
-      include: { workouts: true },
+      where:   { id: req.params.id },
+      include: {
+        weeks: {
+          orderBy: { weekNumber: 'asc' },
+          include: {
+            days: {
+              orderBy: { dayNumber: 'asc' },
+              include: {
+                exercises: {
+                  orderBy: { orderIndex: 'asc' },
+                  include: { exercise: true },
+                },
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!program) {
@@ -87,15 +126,16 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Prevent duplicate enrollment
-    const existing = await prisma.enrollment.findFirst({ where: { userId, programId } });
+    const existing = await prisma.programEnrollment.findUnique({
+      where: { userId_programId: { userId, programId } },
+    });
     if (existing) {
       res.status(409).json({ success: false, error: 'You are already enrolled in this program.' });
       return;
     }
 
-    const enrollment = await prisma.enrollment.create({
-      data: { userId, programId, progress: 0 },
+    const enrollment = await prisma.programEnrollment.create({
+      data:    { userId, programId },
       include: { program: true },
     });
 
@@ -108,12 +148,13 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
 
 // ─── PUT /api/v1/programs/enrollments/:enrollmentId/progress ─────────────────
 // Called by: ProgramsAPI.updateProgress(enrollmentId, data)
+// data: { currentWeek, currentDay, completedDays }
 router.put('/enrollments/:enrollmentId/progress', async (req: AuthRequest, res: Response) => {
   try {
     const { enrollmentId } = req.params;
-    const { progress, completedWorkoutId } = req.body;
+    const { currentWeek, currentDay, completedDays } = req.body;
 
-    const enrollment = await prisma.enrollment.findFirst({
+    const enrollment = await prisma.programEnrollment.findFirst({
       where: { id: enrollmentId, userId: req.user!.id },
     });
 
@@ -122,12 +163,23 @@ router.put('/enrollments/:enrollmentId/progress', async (req: AuthRequest, res: 
       return;
     }
 
-    const updated = await prisma.enrollment.update({
+    // Check if program is fully completed
+    const program = await prisma.program.findUnique({
+      where: { id: enrollment.programId },
+      select: { durationWeeks: true, daysPerWeek: true },
+    });
+
+    const totalDays     = (program?.durationWeeks ?? 0) * (program?.daysPerWeek ?? 0);
+    const newCompleted  = completedDays ?? enrollment.completedDays;
+    const isCompleted   = totalDays > 0 && newCompleted >= totalDays;
+
+    const updated = await prisma.programEnrollment.update({
       where: { id: enrollmentId },
-      data: {
-        progress:            progress            ?? enrollment.progress,
-        completedWorkoutId:  completedWorkoutId  ?? enrollment.completedWorkoutId,
-        lastActivityAt:      new Date(),
+      data:  {
+        ...(currentWeek  !== undefined && { currentWeek }),
+        ...(currentDay   !== undefined && { currentDay }),
+        ...(completedDays !== undefined && { completedDays }),
+        ...(isCompleted && { completedAt: new Date(), isActive: false }),
       },
       include: { program: true },
     });
