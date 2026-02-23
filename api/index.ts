@@ -24,4 +24,6 @@ router.use('/progress',      progressRoutes);
 router.use('/users',         userRoutes);
 router.use('/subscriptions', subscriptionRoutes);
 
-export default router;
+import app from '../src/server.js';
+
+export default app;
