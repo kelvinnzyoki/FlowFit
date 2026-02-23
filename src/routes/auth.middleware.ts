@@ -4,12 +4,12 @@ import prisma from '../config/db.js';
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'change_me_access';
 
-// Extend Express Request to carry the authenticated user
 export interface AuthRequest extends Request {
   user?: {
     id: string;
     name: string;
     email: string;
+    role: string;
   };
 }
 
@@ -30,8 +30,8 @@ export const authenticate = async (
     const decoded = jwt.verify(token, JWT_ACCESS_SECRET) as { userId: string };
 
     const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: { id: true, name: true, email: true },
+      where:  { id: decoded.userId },
+      select: { id: true, name: true, email: true, role: true },
     });
 
     if (!user) {
