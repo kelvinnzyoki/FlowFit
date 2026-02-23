@@ -1,18 +1,18 @@
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 
 const getRedisClient = () => {
   if (process.env.REDIS_URL) {
     const client = new Redis(process.env.REDIS_URL, {
       tls: {
-        rejectUnauthorized: false, // Required for Upstash
+        rejectUnauthorized: false,
       },
       maxRetriesPerRequest: 3,
     });
 
-    client.on('error', (err) => console.error('Redis Error:', err));
+    client.on('error', (err: Error) => console.error('Redis Error:', err));
     return client;
   }
-  
+
   console.warn('REDIS_URL missing; Redis disabled.');
   return null;
 };
