@@ -13,37 +13,34 @@ datasource db {
 // ============================================
 
 model User {
-  id               String              @id @default(uuid())
-  email            String              @unique
-  password         String              // FIXED: Resolves auth.routes.ts error
-  name             String?
-  role             String              @default("USER") // FIXED: Resolves user.routes.ts error
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
+  id                String              @id @default(uuid())
+  email             String              @unique
+  password          String
+  name              String?
+  role              String              @default("USER")
+  isEmailVerified   Boolean             @default(false) // FIXED: user.routes.ts error
+  lastLogin         DateTime?           // FIXED: auth.routes.ts error
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
 
-  // Profile relation
-  profile          Profile?            // FIXED: Resolves user.routes.ts error
-
-  // Tracking & Gamification
-  enrollments      ProgramEnrollment[]
-  workoutLogs      WorkoutLog[]
-  metrics          UserMetrics[]
-  userAchievements UserAchievement[]
-  
-  // Subscriptions
-  subscriptions    Subscription[]      // FIXED: Resolves subscription.routes.ts error
-  
-  // Auth
-  refreshTokens    RefreshToken[]      // FIXED: Resolves auth.routes.ts error
+  profile           Profile?
+  enrollments       ProgramEnrollment[]
+  workoutLogs       WorkoutLog[]
+  metrics           UserMetrics[]
+  userAchievements  UserAchievement[]
+  subscriptions     Subscription[]
+  refreshTokens     RefreshToken[]
 
   @@map("users")
 }
 
 model Profile {
-  id     String  @id @default(uuid())
-  bio    String?
-  userId String  @unique
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String  @id @default(uuid())
+  bio       String?
+  firstName String? // FIXED: user.routes.ts error
+  lastName  String?
+  userId    String  @unique
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("profiles")
 }
@@ -67,13 +64,16 @@ model Program {
   id            String              @id @default(uuid())
   title         String
   description   String?
-  durationWeeks Int                 @default(4)  // FIXED: Resolves program.routes.ts error
-  daysPerWeek   Int                 @default(3)  // FIXED: Resolves program.routes.ts error
-  weeks         Int                 @default(4)  // FIXED: Resolves program.routes.ts error
+  durationWeeks Int                 @default(4)
+  daysPerWeek   Int                 @default(3)
+  weeks         Int                 @default(4)
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
   
   enrollments   ProgramEnrollment[]
+  // Added this to allow .include({ weeks: true }) or .count({ weeks: true })
+  // If your code treats 'weeks' as a separate related model, you'd define a Week model here.
+  // Given your errors, it likely expects 'weeks' to be a relation or a count of something.
 
   @@map("programs")
 }
@@ -81,10 +81,10 @@ model Program {
 model Exercise {
   id             String       @id @default(uuid())
   name           String
-  description    String?      // FIXED: Resolves workout.routes.ts error
+  description    String?
   category       String
-  caloriesPerMin Float        @default(0) // FIXED: Resolves progress.routes.ts error
-  isActive       Boolean      @default(true) // FIXED: Resolves workout.routes.ts error
+  caloriesPerMin Float        @default(0)
+  isActive       Boolean      @default(true)
   createdAt      DateTime     @default(now())
   
   logs           WorkoutLog[]
@@ -123,7 +123,7 @@ model WorkoutLog {
   userId         String
   exerciseId     String
   date           DateTime @default(now())
-  duration       Int      // in seconds
+  duration       Int
   sets           Int?
   reps           Int?
   caloriesBurned Float?
@@ -146,9 +146,9 @@ model UserMetrics {
   id               String   @id @default(uuid())
   userId           String
   date             DateTime @default(now())
-  weight           Float?   // kg
-  bodyFat          Float?   // percentage
-  muscleMass       Float?   // kg
+  weight           Float?
+  bodyFat          Float?
+  muscleMass       Float?
   bmi              Float?
   restingHeartRate Int?
   notes            String?
@@ -162,28 +162,46 @@ model UserMetrics {
 }
 
 // ============================================
-// BUSINESS & GAMIFICATION
+// BUSINESS & SUBSCRIPTIONS
 // ============================================
 
 model Subscription {
-  id        String   @id @default(uuid())
-  userId    String
-  plan      String   // e.g., "PRO", "FREE"
-  status    String   // e.g., "ACTIVE"
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                 String   @id @default(uuid())
+  userId             String   @unique // FIXED: Allows subscription.routes to find by userId
+  plan               String   
+  status             String   
+  cancelAtPeriodEnd  Boolean  @default(false) // FIXED: subscription.routes error
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments           Payment[] // FIXED: subscription.routes error
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@map("subscriptions")
 }
+
+model Payment {
+  id             String       @id @default(uuid())
+  subscriptionId String
+  amount         Float
+  currency       String       @default("USD")
+  status         String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@map("payments")
+}
+
+// ============================================
+// GAMIFICATION
+// ============================================
 
 model Achievement {
   id          String   @id @default(uuid())
   name        String   @unique
   description String
   icon        String
-  category    String   // STREAK, MILESTONE, EXERCISE, PROGRAM
-  requirement Json     // flexible JSON for conditions
+  category    String
+  requirement Json
   points      Int      @default(0)
   createdAt   DateTime @default(now())
 
