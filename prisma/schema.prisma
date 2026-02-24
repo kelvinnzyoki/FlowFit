@@ -39,7 +39,8 @@ model Profile {
   bio         String?
   firstName   String?
   lastName    String?
-  dateOfBirth DateTime? // FIXED: Resolves user.routes.ts error
+  dateOfBirth DateTime?
+  gender      String?   // FIXED: Resolves user.routes.ts error
   userId      String    @unique
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -71,7 +72,7 @@ model Program {
   updatedAt     DateTime            @updatedAt
   
   enrollments   ProgramEnrollment[]
-  weeks         Week[]              // FIXED: Resolves program.routes.ts error (weeks relation)
+  weeks         Week[]
 
   @@map("programs")
 }
@@ -79,13 +80,26 @@ model Program {
 
 // Add this model to satisfy the .include({ weeks: true }) in your routes
 model Week {
-  id        String   @id @default(uuid())
-  programId String
-  program   Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
-  order     Int
-  title     String?
+  id          String   @id @default(uuid())
+  weekNumber  Int      // FIXED: Resolves program.routes.ts sorting error
+  title       String?
+  programId   String
+  program     Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  days        Day[]    // FIXED: Resolves the 'days' does not exist error
 
   @@map("weeks")
+}
+
+
+// Add the Day model
+model Day {
+  id          String   @id @default(uuid())
+  dayNumber   Int      // e.g., 1 to 7
+  title       String?  // e.g., "Leg Day"
+  weekId      String
+  week        Week     @relation(fields: [weekId], references: [id], onDelete: Cascade)
+
+  @@map("days")
 }
 
 
