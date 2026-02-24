@@ -45,7 +45,9 @@ model Profile {
   weight       Float?    
   targetWeight Float?    
   fitnessGoal  String?   
-  fitnessLevel String?   // FIXED: Resolves user.routes.ts error
+  fitnessLevel String?   
+  timezone     String?   // FIXED: Resolves user.routes.ts error
+  preferredUnits String? // PROACTIVE FIX: Common next field (metric/imperial)
   userId       String    @unique
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
