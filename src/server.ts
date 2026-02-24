@@ -1,3 +1,4 @@
+import * as express from 'express';
 import 'dotenv/config';
 import { rateLimit } from 'express-rate-limit';
 import cors from 'cors';
@@ -19,7 +20,7 @@ import redis from './config/redis.js';
 // CREATE EXPRESS APP
 // ============================================
 
-const app: Application = express();
+const app: express.Application = express.default();  // or express() if default works
 
 // ============================================
 // SECURITY MIDDLEWARE
