@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import express, { Application, Request, Response } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import cors from 'cors';
 import {
   contentSecurityPolicy,
