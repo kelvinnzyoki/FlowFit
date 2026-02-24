@@ -14,9 +14,8 @@ const buildStore = () => {
   if (redis) {
     return new RedisStore({
       sendCommand: async (...args: string[]): Promise<RedisReply> => {
-        // FIXED: Explicitly cast redis.call to handle the spread of string arguments
-        // and ensure the return type matches the expected Promise<RedisReply>
-        const result = await (redis.call as (...args: string[]) => Promise<any>)(...args);
+        // FIXED: Added the ! operator after 'redis' to satisfy the null check inside the callback
+        const result = await (redis!.call as (...args: string[]) => Promise<any>)(...args);
         return result as RedisReply;
       },
     });
