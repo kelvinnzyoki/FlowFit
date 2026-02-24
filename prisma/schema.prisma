@@ -40,7 +40,8 @@ model Profile {
   firstName   String?
   lastName    String?
   dateOfBirth DateTime?
-  gender      String?   // FIXED: Resolves user.routes.ts error
+  gender      String?   
+  height      Float?    // FIXED: Resolves user.routes.ts error
   userId      String    @unique
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -94,10 +95,13 @@ model Week {
 // Add the Day model
 model Day {
   id          String   @id @default(uuid())
-  dayNumber   Int      // e.g., 1 to 7
-  title       String?  // e.g., "Leg Day"
+  dayNumber   Int      
+  title       String?  
   weekId      String
   week        Week     @relation(fields: [weekId], references: [id], onDelete: Cascade)
+  
+  // FIXED: This allows .include({ exercises: true }) in program.routes.ts
+  exercises   Exercise[] 
 
   @@map("days")
 }
@@ -106,13 +110,14 @@ model Day {
 model Exercise {
   id             String       @id @default(uuid())
   name           String
-  description    String?
+  description    String?      
   category       String
   caloriesPerMin Float        @default(0)
   isActive       Boolean      @default(true)
   createdAt      DateTime     @default(now())
   
   logs           WorkoutLog[]
+  days           Day[]        // FIXED: Completes the relationship
 
   @@map("exercises")
 }
