@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import { rateLimit } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import redis from '../config/redis.js';
 
