@@ -1,7 +1,11 @@
 import 'dotenv/config';
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
-import helmet from 'helmet/index.mjs';
+import {
+  contentSecurityPolicy,
+  crossOriginEmbedderPolicy,
+} from 'helmet';
+
 import compression from 'compression';
 import morgan from 'morgan';
 import logger, { morganStream } from './utils/logger.js';
@@ -22,18 +26,16 @@ const app: Application = express();
 // ============================================
 
 app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        styleSrc:   ["'self'", "'unsafe-inline'"],
-        scriptSrc:  ["'self'"],
-        imgSrc:     ["'self'", 'data:', 'https:'],
-      },
+  contentSecurityPolicy({
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc:   ["'self'", "'unsafe-inline'"],
+      scriptSrc:  ["'self'"],
+      imgSrc:     ["'self'", 'data:', 'https:'],
     },
-    
   })
 );
+
 
 
 app.use(
