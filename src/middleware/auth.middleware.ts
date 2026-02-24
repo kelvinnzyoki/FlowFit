@@ -1,4 +1,3 @@
-// Path: src/middleware/auth.middleware.ts
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/db.js';
@@ -27,11 +26,11 @@ export const authenticate = async (
       return;
     }
 
-    const token   = authHeader.split(' ')[1];
+    const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, JWT_ACCESS_SECRET) as { userId: string };
 
     const user = await prisma.user.findUnique({
-      where:  { id: decoded.userId },
+      where: { id: decoded.userId },
       select: { id: true, name: true, email: true, role: true },
     });
 
@@ -40,7 +39,14 @@ export const authenticate = async (
       return;
     }
 
-    req.user = user;
+    // FIXED: Use nullish coalescing to ensure 'name' is never null
+    req.user = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      name: user.name ?? '', // Converts string | null to string
+    };
+
     next();
   } catch {
     res.status(401).json({ success: false, error: 'Invalid or expired token.' });
