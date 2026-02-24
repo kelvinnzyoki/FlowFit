@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -8,45 +9,91 @@ datasource db {
 }
 
 // ============================================
-// CORE MODELS (Added to fix your errors)
+// CORE USER & AUTH MODELS
 // ============================================
 
 model User {
   id               String              @id @default(uuid())
   email            String              @unique
+  password         String              // FIXED: Resolves auth.routes.ts error
   name             String?
+  role             String              @default("USER") // FIXED: Resolves user.routes.ts error
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
 
-  // Relation fields (The "opposite" sides)
+  // Profile relation
+  profile          Profile?            // FIXED: Resolves user.routes.ts error
+
+  // Tracking & Gamification
   enrollments      ProgramEnrollment[]
   workoutLogs      WorkoutLog[]
   metrics          UserMetrics[]
   userAchievements UserAchievement[]
+  
+  // Subscriptions
+  subscriptions    Subscription[]      // FIXED: Resolves subscription.routes.ts error
+  
+  // Auth
+  refreshTokens    RefreshToken[]      // FIXED: Resolves auth.routes.ts error
 
   @@map("users")
 }
 
+model Profile {
+  id     String  @id @default(uuid())
+  bio    String?
+  userId String  @unique
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("refresh_tokens")
+}
+
+// ============================================
+// CONTENT MODELS (PROGRAMS & EXERCISES)
+// ============================================
+
 model Program {
-  id          String              @id @default(uuid())
-  title       String
-  description String?
-  enrollments ProgramEnrollment[]
+  id            String              @id @default(uuid())
+  title         String
+  description   String?
+  durationWeeks Int                 @default(4)  // FIXED: Resolves program.routes.ts error
+  daysPerWeek   Int                 @default(3)  // FIXED: Resolves program.routes.ts error
+  weeks         Int                 @default(4)  // FIXED: Resolves program.routes.ts error
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  
+  enrollments   ProgramEnrollment[]
 
   @@map("programs")
 }
 
 model Exercise {
-  id          String       @id @default(uuid())
-  name        String
-  category    String
-  logs        WorkoutLog[]
+  id             String       @id @default(uuid())
+  name           String
+  description    String?      // FIXED: Resolves workout.routes.ts error
+  category       String
+  caloriesPerMin Float        @default(0) // FIXED: Resolves progress.routes.ts error
+  isActive       Boolean      @default(true) // FIXED: Resolves workout.routes.ts error
+  createdAt      DateTime     @default(now())
+  
+  logs           WorkoutLog[]
 
   @@map("exercises")
 }
 
 // ============================================
-// PROGRAM & ENROLLMENT
+// TRACKING & ENROLLMENTS
 // ============================================
 
 model ProgramEnrollment {
@@ -71,16 +118,12 @@ model ProgramEnrollment {
   @@map("program_enrollments")
 }
 
-// ============================================
-// WORKOUT TRACKING & PROGRESS
-// ============================================
-
 model WorkoutLog {
   id             String   @id @default(uuid())
   userId         String
   exerciseId     String
   date           DateTime @default(now())
-  duration       Int // in seconds
+  duration       Int      // in seconds
   sets           Int?
   reps           Int?
   caloriesBurned Float?
@@ -103,9 +146,9 @@ model UserMetrics {
   id               String   @id @default(uuid())
   userId           String
   date             DateTime @default(now())
-  weight           Float? // kg
-  bodyFat          Float? // percentage
-  muscleMass       Float? // kg
+  weight           Float?   // kg
+  bodyFat          Float?   // percentage
+  muscleMass       Float?   // kg
   bmi              Float?
   restingHeartRate Int?
   notes            String?
@@ -119,16 +162,28 @@ model UserMetrics {
 }
 
 // ============================================
-// GAMIFICATION
+// BUSINESS & GAMIFICATION
 // ============================================
+
+model Subscription {
+  id        String   @id @default(uuid())
+  userId    String
+  plan      String   // e.g., "PRO", "FREE"
+  status    String   // e.g., "ACTIVE"
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("subscriptions")
+}
 
 model Achievement {
   id          String   @id @default(uuid())
   name        String   @unique
   description String
   icon        String
-  category    String // STREAK, MILESTONE, EXERCISE, PROGRAM
-  requirement Json // flexible JSON for conditions
+  category    String   // STREAK, MILESTONE, EXERCISE, PROGRAM
+  requirement Json     // flexible JSON for conditions
   points      Int      @default(0)
   createdAt   DateTime @default(now())
 
@@ -162,10 +217,6 @@ model Streak {
 
   @@map("streaks")
 }
-
-// ============================================
-// ANALYTICS & REPORTING
-// ============================================
 
 model DailyStats {
   id            String   @id @default(uuid())
