@@ -1,25 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
+// ============================================
+// CORE MODELS (Added to fix your errors)
+// ============================================
+
+model User {
+  id               String              @id @default(uuid())
+  email            String              @unique
+  name             String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  // Relation fields (The "opposite" sides)
+  enrollments      ProgramEnrollment[]
+  workoutLogs      WorkoutLog[]
+  metrics          UserMetrics[]
+  userAchievements UserAchievement[]
+
+  @@map("users")
+}
+
+model Program {
+  id          String              @id @default(uuid())
+  title       String
+  description String?
+  enrollments ProgramEnrollment[]
+
+  @@map("programs")
+}
+
+model Exercise {
+  id          String       @id @default(uuid())
+  name        String
+  category    String
+  logs        WorkoutLog[]
+
+  @@map("exercises")
+}
+
+// ============================================
+// PROGRAM & ENROLLMENT
+// ============================================
 
 model ProgramEnrollment {
-  id              String   @id @default(uuid())
-  userId          String
-  programId       String
-  startDate       DateTime @default(now())
-  currentWeek     Int      @default(1)
-  currentDay      Int      @default(1)
-  completedDays   Int      @default(0)
-  isActive        Boolean  @default(true)
-  completedAt     DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id            String    @id @default(uuid())
+  userId        String
+  programId     String
+  startDate     DateTime  @default(now())
+  currentWeek   Int       @default(1)
+  currentDay    Int       @default(1)
+  completedDays Int       @default(0)
+  isActive      Boolean   @default(true)
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  program         Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  program Program @relation(fields: [programId], references: [id], onDelete: Cascade)
 
   @@unique([userId, programId])
   @@index([userId])
@@ -32,22 +76,22 @@ model ProgramEnrollment {
 // ============================================
 
 model WorkoutLog {
-  id              String   @id @default(uuid())
-  userId          String
-  exerciseId      String
-  date            DateTime @default(now())
-  duration        Int      // in seconds
-  sets            Int?
-  reps            Int?
-  caloriesBurned  Float?
-  heartRate       Int?
-  difficulty      String?
-  notes           String?
-  completed       Boolean  @default(true)
-  createdAt       DateTime @default(now())
+  id             String   @id @default(uuid())
+  userId         String
+  exerciseId     String
+  date           DateTime @default(now())
+  duration       Int // in seconds
+  sets           Int?
+  reps           Int?
+  caloriesBurned Float?
+  heartRate      Int?
+  difficulty     String?
+  notes          String?
+  completed      Boolean  @default(true)
+  createdAt      DateTime @default(now())
 
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  exercise        Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([date])
@@ -56,18 +100,18 @@ model WorkoutLog {
 }
 
 model UserMetrics {
-  id              String   @id @default(uuid())
-  userId          String
-  date            DateTime @default(now())
-  weight          Float?   // kg
-  bodyFat         Float?   // percentage
-  muscleMass      Float?   // kg
-  bmi             Float?
+  id               String   @id @default(uuid())
+  userId           String
+  date             DateTime @default(now())
+  weight           Float? // kg
+  bodyFat          Float? // percentage
+  muscleMass       Float? // kg
+  bmi              Float?
   restingHeartRate Int?
-  notes           String?
-  createdAt       DateTime @default(now())
+  notes            String?
+  createdAt        DateTime @default(now())
 
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([date])
@@ -79,28 +123,28 @@ model UserMetrics {
 // ============================================
 
 model Achievement {
-  id              String   @id @default(uuid())
-  name            String   @unique
-  description     String
-  icon            String
-  category        String   // STREAK, MILESTONE, EXERCISE, PROGRAM
-  requirement     Json     // flexible JSON for conditions
-  points          Int      @default(0)
-  createdAt       DateTime @default(now())
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String
+  icon        String
+  category    String // STREAK, MILESTONE, EXERCISE, PROGRAM
+  requirement Json // flexible JSON for conditions
+  points      Int      @default(0)
+  createdAt   DateTime @default(now())
 
-  users           UserAchievement[]
+  users UserAchievement[]
 
   @@map("achievements")
 }
 
 model UserAchievement {
-  id              String   @id @default(uuid())
-  userId          String
-  achievementId   String
-  unlockedAt      DateTime @default(now())
+  id            String   @id @default(uuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime @default(now())
 
-  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  achievement     Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
 
   @@unique([userId, achievementId])
   @@index([userId])
@@ -108,13 +152,13 @@ model UserAchievement {
 }
 
 model Streak {
-  id              String   @id @default(uuid())
-  userId          String   @unique
-  currentStreak   Int      @default(0)
-  longestStreak   Int      @default(0)
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  currentStreak   Int       @default(0)
+  longestStreak   Int       @default(0)
   lastWorkoutDate DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@map("streaks")
 }
@@ -124,14 +168,14 @@ model Streak {
 // ============================================
 
 model DailyStats {
-  id              String   @id @default(uuid())
-  date            DateTime @unique @default(now())
-  totalUsers      Int      @default(0)
-  activeUsers     Int      @default(0)
-  newUsers        Int      @default(0)
-  totalWorkouts   Int      @default(0)
-  revenue         Float    @default(0)
-  createdAt       DateTime @default(now())
+  id            String   @id @default(uuid())
+  date          DateTime @unique @default(now())
+  totalUsers    Int      @default(0)
+  activeUsers   Int      @default(0)
+  newUsers      Int      @default(0)
+  totalWorkouts Int      @default(0)
+  revenue       Float    @default(0)
+  createdAt     DateTime @default(now())
 
   @@index([date])
   @@map("daily_stats")
