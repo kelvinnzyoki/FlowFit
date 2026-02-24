@@ -1,3 +1,10 @@
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
 model ProgramEnrollment {
   id              String   @id @default(uuid())
   userId          String
