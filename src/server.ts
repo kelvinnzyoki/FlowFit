@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
-import helmet from 'helmet';
+import * as helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
 import logger, { morganStream } from './utils/logger.js';
@@ -22,7 +22,7 @@ const app: Application = express();
 // ============================================
 
 app.use(
-  helmet({
+  helmet.default({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
