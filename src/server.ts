@@ -21,16 +21,19 @@ const app: Application = express();
 // SECURITY MIDDLEWARE
 // ============================================
 
-app.use(helmet.contentSecurityPolicy({
-  directives: {
-    defaultSrc: ["'self'"],
-    styleSrc:   ["'self'", "'unsafe-inline'"],
-    scriptSrc:  ["'self'"],
-    imgSrc:     ["'self'", 'data:', 'https:'],
-  },
-}));
-
-app.use(helmet.crossOriginEmbedderPolicy({ policy: false }));
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc:   ["'self'", "'unsafe-inline'"],
+        scriptSrc:  ["'self'"],
+        imgSrc:     ["'self'", 'data:', 'https:'],
+      },
+    },
+    
+  })
+);
 
 
 app.use(
