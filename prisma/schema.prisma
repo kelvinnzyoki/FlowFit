@@ -35,12 +35,13 @@ model User {
 }
 
 model Profile {
-  id        String  @id @default(uuid())
-  bio       String?
-  firstName String? // FIXED: user.routes.ts error
-  lastName  String?
-  userId    String  @unique
-  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid())
+  bio         String?
+  firstName   String?
+  lastName    String?
+  dateOfBirth DateTime? // FIXED: Resolves user.routes.ts error
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("profiles")
 }
@@ -66,17 +67,27 @@ model Program {
   description   String?
   durationWeeks Int                 @default(4)
   daysPerWeek   Int                 @default(3)
-  weeks         Int                 @default(4)
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
   
   enrollments   ProgramEnrollment[]
-  // Added this to allow .include({ weeks: true }) or .count({ weeks: true })
-  // If your code treats 'weeks' as a separate related model, you'd define a Week model here.
-  // Given your errors, it likely expects 'weeks' to be a relation or a count of something.
+  weeks         Week[]              // FIXED: Resolves program.routes.ts error (weeks relation)
 
   @@map("programs")
 }
+
+
+// Add this model to satisfy the .include({ weeks: true }) in your routes
+model Week {
+  id        String   @id @default(uuid())
+  programId String
+  program   Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  order     Int
+  title     String?
+
+  @@map("weeks")
+}
+
 
 model Exercise {
   id             String       @id @default(uuid())
