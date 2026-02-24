@@ -1,4 +1,5 @@
-import * as express from 'express';
+// Cache bust - express import fix - 2026-02-24 v6
+import express, { Application, Request, Response } from 'express';
 import 'dotenv/config';
 import { rateLimit } from 'express-rate-limit';
 import cors from 'cors';
@@ -19,8 +20,7 @@ import redis from './config/redis.js';
 // ============================================
 // CREATE EXPRESS APP
 // ============================================
-
-const app: express.Application = express();  // or express() if default works
+const app: Application = express();  // ← no .default(), no namespace
 
 // ============================================
 // SECURITY MIDDLEWARE
