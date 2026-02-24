@@ -35,24 +35,27 @@ model User {
 }
 
 model Profile {
-  id           String    @id @default(uuid())
-  bio          String?
-  firstName    String?
-  lastName     String?
-  dateOfBirth  DateTime?
-  gender       String?   
-  height       Float?    
-  weight       Float?    
-  targetWeight Float?    
-  fitnessGoal  String?   
-  fitnessLevel String?   
-  timezone     String?   // FIXED: Resolves user.routes.ts error
-  preferredUnits String? // PROACTIVE FIX: Common next field (metric/imperial)
-  userId       String    @unique
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String    @id @default(uuid())
+  bio                String?
+  firstName          String?
+  lastName           String?
+  dateOfBirth        DateTime?
+  gender             String?   
+  height             Float?    
+  weight             Float?    
+  targetWeight       Float?    
+  fitnessGoal        String?   
+  fitnessLevel       String?   
+  timezone           String?   
+  avatarUrl          String?   // FIXED: Resolves user.routes.ts error
+  onboardingCompleted Boolean  @default(false) // PROACTIVE: Common next field
+  isPublic           Boolean   @default(true)  // PROACTIVE: Common next field
+  userId             String    @unique
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("profiles")
 }
+
 
 model RefreshToken {
   id        String   @id @default(uuid())
