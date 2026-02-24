@@ -2,17 +2,22 @@ import rateLimit from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import redis from '../config/redis.js';
 
-// Define a type that matches the expected Redis reply for the store
+// Define a type for the Redis reply to satisfy the library's expectations
 type RedisReply = string | number | (string | number)[];
 
+/**
+ * Builds a Redis-backed store for express-rate-limit.
+ * Uses a type-safe wrapper for the ioredis 'call' method to resolve
+ * spread argument (TS2556) and return type (TS2322) errors.
+ */
 const buildStore = () => {
-  // FIXED: Check if redis exists and handle type casting for sendCommand
   if (redis) {
     return new RedisStore({
       sendCommand: async (...args: string[]): Promise<RedisReply> => {
-        // We use 'as any' to bypass the complex ioredis/rate-limit-redis type mismatch
-        // but cast the final result to Promise<RedisReply>
-        return (await redis!.call(...args)) as RedisReply;
+        // FIXED: Explicitly cast redis.call to handle the spread of string arguments
+        // and ensure the return type matches the expected Promise<RedisReply>
+        const result = await (redis.call as (...args: string[]) => Promise<any>)(...args);
+        return result as RedisReply;
       },
     });
   }
@@ -21,9 +26,10 @@ const buildStore = () => {
     'Rate limiter: Redis unavailable, falling back to in-memory store. ' +
     'Rate limits will NOT be shared across serverless instances.'
   );
-  return undefined; 
+  return undefined; // Falls back to MemoryStore
 };
 
+// Standard limiter: 100 requests per 15 minutes
 export const standardLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -36,6 +42,7 @@ export const standardLimiter = rateLimit({
   },
 });
 
+// Stricter limiter for auth endpoints: 10 attempts per hour
 export const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 10,
