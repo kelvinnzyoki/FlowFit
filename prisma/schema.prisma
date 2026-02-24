@@ -44,7 +44,8 @@ model Profile {
   height       Float?    
   weight       Float?    
   targetWeight Float?    
-  fitnessGoal  String?   // FIXED: Resolves user.routes.ts error
+  fitnessGoal  String?   
+  fitnessLevel String?   // FIXED: Resolves user.routes.ts error
   userId       String    @unique
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
