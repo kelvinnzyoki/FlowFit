@@ -35,16 +35,17 @@ model User {
 }
 
 model Profile {
-  id          String    @id @default(uuid())
-  bio         String?
-  firstName   String?
-  lastName    String?
-  dateOfBirth DateTime?
-  gender      String?   
-  height      Float?    
-  weight      Float?    // FIXED: Resolves user.routes.ts error
-  userId      String    @unique
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String    @id @default(uuid())
+  bio          String?
+  firstName    String?
+  lastName     String?
+  dateOfBirth  DateTime?
+  gender       String?   
+  height       Float?    
+  weight       Float?    
+  targetWeight Float?    // FIXED: Resolves user.routes.ts error
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("profiles")
 }
