@@ -20,7 +20,7 @@ import redis from './config/redis.js';
 // CREATE EXPRESS APP
 // ============================================
 
-const app: express.Application = express.default();  // or express() if default works
+const app: express.Application = express();  // or express() if default works
 
 // ============================================
 // SECURITY MIDDLEWARE
