@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
-import helmet from 'helmet/index.js';
+import helmet from 'helmet/index.mjs';
 import compression from 'compression';
 import morgan from 'morgan';
 import logger, { morganStream } from './utils/logger.js';
