@@ -46,6 +46,10 @@ export const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 10,
   standardHeaders: true,
+  skip: (req) => req.method === 'OPTIONS',
+  keyGenerator: (req) => {
+  return `${req.ip}-${req.body.email}`;
+},
   legacyHeaders: false,
   store: buildStore(),
   message: {
