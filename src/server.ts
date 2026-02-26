@@ -22,9 +22,13 @@ import redis from './config/redis.js';
 // ============================================
 const app: Application = express();  // ← no .default(), no namespace
 
+
+app.set('trust proxy', 1);
+
 // ============================================
 // SECURITY MIDDLEWARE
 // ============================================
+
 
 app.use(
   contentSecurityPolicy({
