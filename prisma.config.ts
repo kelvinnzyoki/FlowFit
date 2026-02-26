@@ -1,8 +1,14 @@
-import { defineConfig } from '@prisma/config';
+// prisma.config.ts (at project root)
+import "dotenv/config";  // Loads .env if you have one; safe even without it
+import { defineConfig, env } from "@prisma/config";
 
 export default defineConfig({
-  schema: 'prisma/schema.prisma',
+  schema: "prisma/schema.prisma",
   datasource: {
-    url: process.env.DATABASE_URL,  // or env("DATABASE_URL") if using Prisma's env helper
+    url: env("DATABASE_URL"),  // Reads from your Codespaces secret
   },
+  // Optional: add these if needed later
+  // migrations: {
+  //   path: "prisma/migrations",
+  // },
 });
