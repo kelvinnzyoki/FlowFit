@@ -45,6 +45,9 @@ import programRoutes      from './program.routes.js';
 import progressRoutes     from './progress.routes.js';
 import userRoutes         from './user.routes.js';
 import subscriptionRoutes from './subscription.routes.js';
+import seedRoute from './seed.route.js';
+router.use('/seed', seedRoute);
+ 
 
 const router = Router();
 
