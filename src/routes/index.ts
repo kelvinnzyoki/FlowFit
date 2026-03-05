@@ -45,7 +45,6 @@ import programRoutes      from './program.routes.js';
 import progressRoutes     from './progress.routes.js';
 import userRoutes         from './user.routes.js';
 import subscriptionRoutes from './subscription.routes.js';
-import seedRoute from './seed.route.js';      // ← add this
 
      
 const router = Router();
@@ -73,6 +72,6 @@ router.use('/users',         userRoutes);
 router.use('/subscriptions', subscriptionRoutes);
 
 
-router.use('/seed', seedRoute);   
+
 
 export default router;
