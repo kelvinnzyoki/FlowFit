@@ -58,8 +58,7 @@ router.get('/test', (req: Request, res: Response) => {
 
 
 router.use('/seed', seedRoute);
-// ─── Auth ─────────────────────router.use('/seed', seedRoute);
-───────────────────────────────────────────────
+// ─── Auth ─────────────────
 // Rate limiting on login/register is applied inside auth.routes.ts
 router.use('/auth', authRoutes);
 
