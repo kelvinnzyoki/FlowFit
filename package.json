@@ -4,6 +4,9 @@
   "type": "module",
   "description": "Production-ready Node.js backend for FlowFit SaaS platform",
   "main": "dist/src/server.js",
+  "prisma": {
+  "seed": "ts-node prisma/seed.ts"
+  },
   "scripts": {
     "dev": "nodemon src/server.ts",
     "build": "npx prisma generate --schema=./prisma/schema.prisma && npx tsc",
