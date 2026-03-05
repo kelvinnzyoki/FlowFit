@@ -49,13 +49,15 @@ import seedRoute from './seed.route.js';
 const router = Router();
 
 
-router.use('/seed', seedRoute);
+
 
 // ─── Smoke test ──────────────────────────────────────────────────────────────
 router.get('/test', (req: Request, res: Response) => {
   res.json({ success: true, message: 'FlowFit API is running ✅' });
 });
 
+
+router.use('/seed', seedRoute);
 // ─── Auth ─────────────────────router.use('/seed', seedRoute);
 ───────────────────────────────────────────────
 // Rate limiting on login/register is applied inside auth.routes.ts
