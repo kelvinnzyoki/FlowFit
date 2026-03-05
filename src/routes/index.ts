@@ -66,7 +66,7 @@ router.use('/auth', authRoutes);
 
 // ─── Protected resource routes ───────────────────────────────────────────────
 // JWT authentication is applied inside each router via authenticate middleware
-router.use('/workouts',      workoutRoutes);
+router.use('/exercises',      workoutRoutes);
 router.use('/programs',      programRoutes);
 router.use('/progress',      progressRoutes);
 router.use('/users',         userRoutes);
