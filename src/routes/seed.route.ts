@@ -1,42 +1,46 @@
 /**
- * ONE-TIME SEED ROUTE
- * ───────────────────
- * Add to your routes/index.ts, deploy to Vercel, visit the URL once, then DELETE this file.
+ * ONE-TIME SEED ROUTE — FULLY FIXED
+ * ───────────────────────────────────
+ * BUGS FIXED vs the previous version:
+ *   1. Removed `new PrismaClient()` → now uses shared singleton from config/db.js
+ *      (old version exhausted DB connections and crashed all other routes)
+ *   2. Removed `prisma.$disconnect()` in finally block
+ *      (old version killed the DB connection for every other route after seeding)
+ *   3. Replaced Array(N).fill([...]) with Array.from({length:N}, () => [...])
+ *      (old version gave all weeks the same array reference in memory)
+ *   4. Week upsert now also updates `title`, not just weekNumber
+ *
+ * ALSO FIX THIS IN src/routes/index.ts (one line):
+ *   Change:  router.use('/workouts', workoutRoutes);
+ *   To:      router.use('/exercises', workoutRoutes);
+ *   Reason:  frontend api.js calls /api/v1/exercises but route is mounted as
+ *            /workouts — so every request 404s and falls back to sample data.
  *
  * USAGE:
- *   1. Add to routes/index.ts:
+ *   1. In src/routes/index.ts add:
  *        import seedRoute from './seed.route.js';
  *        router.use('/seed', seedRoute);
- *
- *   2. Set SEED_SECRET in your Vercel environment variables to any secret string
- *      (e.g. "myapp-seed-2024-abc123")
- *
- *   3. Deploy: git add . && git commit -m "add seed route" && git push
- *
- *   4. Open on your phone:
- *      https://fit.cctamcc.site/api/v1/seed?secret=YOUR_SEED_SECRET
- *
- *   5. Wait ~30 seconds. You'll see JSON confirming success.
- *
- *   6. DELETE this file + remove the import from routes/index.ts + redeploy.
- *      Never leave a seed route live in production.
+ *   2. Add SEED_SECRET to Render/Railway environment variables
+ *   3. Commit and push, wait for deploy
+ *   4. Visit on phone: https://fit.cctamcc.site/api/v1/seed?secret=YOUR_SEED_SECRET
+ *   5. See { success: true } JSON response
+ *   6. Delete this file + remove import + redeploy
  */
 
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../config/db.js';   // FIX 1: shared singleton, NOT new PrismaClient()
 
 const router = Router();
-const prisma = new PrismaClient();
 
 router.get('/', async (req: Request, res: Response) => {
-  // ── Security: require secret query param so random people can't trigger it ─
-  const secret = req.query.secret as string;
+
+  const secret   = req.query.secret as string;
   const expected = process.env.SEED_SECRET;
 
   if (!expected) {
     return res.status(500).json({
       success: false,
-      error: 'SEED_SECRET environment variable not set. Add it in Vercel dashboard.',
+      error: 'SEED_SECRET environment variable is not set. Add it in your Render/Railway dashboard.',
     });
   }
 
@@ -50,9 +54,7 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const log: string[] = [];
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // EXERCISES
-    // ──────────────────────────────────────────────────────────────────────────
+    // ── 1. EXERCISES (21) ────────────────────────────────────────────────────
     const exerciseData = [
       { id:'ex-pushup', name:'Push-ups',           category:'STRENGTH',    caloriesPerMin:8.0,  description:'Classic upper body exercise targeting chest, shoulders, and triceps.' },
       { id:'ex-squat',  name:'Squats',             category:'STRENGTH',    caloriesPerMin:9.0,  description:'Fundamental lower body movement for building leg strength and power.' },
@@ -80,7 +82,7 @@ router.get('/', async (req: Request, res: Response) => {
     let exCount = 0;
     for (const ex of exerciseData) {
       await prisma.exercise.upsert({
-        where: { id: ex.id },
+        where:  { id: ex.id },
         update: { name: ex.name, description: ex.description, category: ex.category, caloriesPerMin: ex.caloriesPerMin },
         create: { ...ex, isActive: true },
       });
@@ -88,20 +90,18 @@ router.get('/', async (req: Request, res: Response) => {
     }
     log.push(`✓ ${exCount} exercises`);
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // ACHIEVEMENTS
-    // ──────────────────────────────────────────────────────────────────────────
+    // ── 2. ACHIEVEMENTS (10) ─────────────────────────────────────────────────
     const achievements = [
-      { name:'First Workout',    description:'Complete your very first workout',           icon:'🎯', category:'MILESTONE', requirement:{ type:'total_workouts', value:1 },    points:10 },
-      { name:'Week Warrior',     description:'Complete 7 consecutive days of workouts',    icon:'🔥', category:'STREAK',    requirement:{ type:'streak_days',    value:7 },    points:50 },
-      { name:'Century Club',     description:'Log 100 total workouts',                     icon:'💯', category:'MILESTONE', requirement:{ type:'total_workouts', value:100 },  points:200 },
-      { name:'Calorie Crusher',  description:'Burn 10,000 total calories',                 icon:'🔥', category:'CALORIES',  requirement:{ type:'total_calories', value:10000 }, points:100 },
-      { name:'Iron Will',        description:'Maintain a 30-day workout streak',           icon:'💪', category:'STREAK',    requirement:{ type:'streak_days',    value:30 },   points:250 },
-      { name:'Early Bird',       description:'Complete 10 workouts before 8am',            icon:'🌅', category:'HABIT',     requirement:{ type:'early_workouts', value:10 },   points:75 },
+      { name:'First Workout',    description:'Complete your very first workout',           icon:'🎯', category:'MILESTONE', requirement:{ type:'total_workouts',    value:1     }, points:10  },
+      { name:'Week Warrior',     description:'Complete 7 consecutive days of workouts',    icon:'🔥', category:'STREAK',    requirement:{ type:'streak_days',       value:7     }, points:50  },
+      { name:'Century Club',     description:'Log 100 total workouts',                     icon:'💯', category:'MILESTONE', requirement:{ type:'total_workouts',    value:100   }, points:200 },
+      { name:'Calorie Crusher',  description:'Burn 10,000 total calories',                 icon:'⚡', category:'CALORIES',  requirement:{ type:'total_calories',    value:10000 }, points:100 },
+      { name:'Iron Will',        description:'Maintain a 30-day workout streak',           icon:'💪', category:'STREAK',    requirement:{ type:'streak_days',       value:30    }, points:250 },
+      { name:'Early Bird',       description:'Complete 10 workouts before 8am',            icon:'🌅', category:'HABIT',     requirement:{ type:'early_workouts',    value:10    }, points:75  },
       { name:'Strength Seeker',  description:'Complete 25 strength training sessions',     icon:'🏋️', category:'CATEGORY',  requirement:{ type:'category_workouts', category:'STRENGTH', value:25 }, points:100 },
       { name:'Cardio King',      description:'Complete 25 cardio sessions',                icon:'🏃', category:'CATEGORY',  requirement:{ type:'category_workouts', category:'CARDIO',   value:25 }, points:100 },
       { name:'Core Master',      description:'Complete 25 core workouts',                  icon:'🧘', category:'CATEGORY',  requirement:{ type:'category_workouts', category:'CORE',     value:25 }, points:100 },
-      { name:'Program Graduate', description:'Complete your first full training program',  icon:'🎓', category:'PROGRAM',   requirement:{ type:'programs_completed', value:1 },           points:300 },
+      { name:'Program Graduate', description:'Complete your first full training program',  icon:'🎓', category:'PROGRAM',   requirement:{ type:'programs_completed', value:1 },              points:300 },
     ];
 
     let achCount = 0;
@@ -115,20 +115,20 @@ router.get('/', async (req: Request, res: Response) => {
     }
     log.push(`✓ ${achCount} achievements`);
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // PROGRAMS (with weeks, days, exercises)
-    // ──────────────────────────────────────────────────────────────────────────
+    // ── 3. PROGRAMS (5) with Weeks → Days → Exercises ────────────────────────
     type ProgramDef = {
       id: string; title: string; description: string;
       durationWeeks: number; daysPerWeek: number;
-      weeks: string[][][]; // weeks[weekIdx][dayIdx] = exerciseId[]
+      weeks: string[][][];
     };
 
+    // FIX 3: Array.from({length:N}, () => [...]) — each week gets its OWN array copy.
+    // Array(N).fill([...]) would give all N weeks the same reference (wrong).
     const programs: ProgramDef[] = [
       {
         id: 'prog-beginner', title: 'Beginner Foundation', durationWeeks: 4, daysPerWeek: 3,
-        description: 'Perfect for beginners. Master fundamental movements, build confidence, and establish a sustainable fitness habit over 4 weeks.',
-        weeks: Array(4).fill([
+        description: 'Perfect for beginners. Master fundamental movements and build a sustainable habit over 4 weeks.',
+        weeks: Array.from({ length: 4 }, () => [
           ['ex-pushup', 'ex-dips',   'ex-plank'],
           ['ex-squat',  'ex-lunge',  'ex-glute'],
           ['ex-crunch', 'ex-jjack',  'ex-plank'],
@@ -136,8 +136,8 @@ router.get('/', async (req: Request, res: Response) => {
       },
       {
         id: 'prog-hiit', title: 'Fat Burn HIIT', durationWeeks: 6, daysPerWeek: 4,
-        description: 'High-intensity interval training to maximise calorie burn and boost your metabolism. For intermediate athletes ready to push their limits.',
-        weeks: Array(6).fill([
+        description: 'High-intensity interval training to maximise calorie burn. For intermediate athletes.',
+        weeks: Array.from({ length: 6 }, () => [
           ['ex-burpee', 'ex-sqjmp',  'ex-mclimb'],
           ['ex-hknees', 'ex-bkicks', 'ex-jjack'],
           ['ex-sprint', 'ex-boxjmp', 'ex-burpee'],
@@ -146,8 +146,8 @@ router.get('/', async (req: Request, res: Response) => {
       },
       {
         id: 'prog-core', title: 'Core Power', durationWeeks: 4, daysPerWeek: 3,
-        description: 'Focused 4-week core training to build a strong, stable midsection. Suitable for all fitness levels.',
-        weeks: Array(4).fill([
+        description: 'Focused 4-week core training to build a strong, stable midsection.',
+        weeks: Array.from({ length: 4 }, () => [
           ['ex-plank',  'ex-crunch', 'ex-lraise'],
           ['ex-mclimb', 'ex-rtwist', 'ex-plank'],
           ['ex-lraise', 'ex-crunch', 'ex-rtwist'],
@@ -155,8 +155,8 @@ router.get('/', async (req: Request, res: Response) => {
       },
       {
         id: 'prog-strength', title: 'Full Body Strength', durationWeeks: 8, daysPerWeek: 5,
-        description: 'Comprehensive 8-week bodyweight strength program with progressive overload. For intermediate athletes.',
-        weeks: Array(8).fill([
+        description: 'Comprehensive 8-week bodyweight strength program for intermediate athletes.',
+        weeks: Array.from({ length: 8 }, () => [
           ['ex-pushup', 'ex-pike',   'ex-dips'],
           ['ex-squat',  'ex-lunge',  'ex-glute'],
           ['ex-plank',  'ex-crunch', 'ex-mclimb'],
@@ -166,8 +166,8 @@ router.get('/', async (req: Request, res: Response) => {
       },
       {
         id: 'prog-flex', title: 'Mobility & Flexibility', durationWeeks: 3, daysPerWeek: 4,
-        description: 'Improve range of motion, reduce injury risk, and recover faster. Perfect for athletes with tight hips and hamstrings.',
-        weeks: Array(3).fill([
+        description: 'Improve range of motion and reduce injury risk. Perfect for tight hips and hamstrings.',
+        weeks: Array.from({ length: 3 }, () => [
           ['ex-ddog',  'ex-hipfx', 'ex-child'],
           ['ex-hipfx', 'ex-ddog',  'ex-child'],
           ['ex-child', 'ex-ddog',  'ex-hipfx'],
@@ -188,7 +188,7 @@ router.get('/', async (req: Request, res: Response) => {
         const weekId = `${p.id}-w${wi + 1}`;
         await prisma.week.upsert({
           where:  { id: weekId },
-          update: { weekNumber: wi + 1 },
+          update: { weekNumber: wi + 1, title: `Week ${wi + 1}` },  // FIX 4: update title too
           create: { id: weekId, weekNumber: wi + 1, title: `Week ${wi + 1}`, programId: p.id },
         });
 
@@ -214,24 +214,23 @@ router.get('/', async (req: Request, res: Response) => {
     }
     log.push(`✓ ${progCount} programs`);
 
-    // ── Done ──────────────────────────────────────────────────────────────────
     return res.json({
       success: true,
       message: '🌱 Database seeded successfully!',
-      seeded: log,
-      next: 'Delete this route from your codebase and redeploy.',
+      seeded:  log,
+      next:    'Delete this file, remove its import from routes/index.ts, and redeploy.',
     });
 
   } catch (error: any) {
     console.error('Seed error:', error);
     return res.status(500).json({
       success: false,
-      error: error.message || 'Seed failed',
-      hint: 'Check your Vercel function logs for the full stack trace.',
+      error:   error.message || 'Seed failed',
+      hint:    'Check your Render/Railway deployment logs for the full stack trace.',
     });
-  } finally {
-    await prisma.$disconnect();
   }
+  // FIX 2: NO finally { prisma.$disconnect() }
+  // Disconnecting the shared singleton kills the DB for every other route.
 });
 
 export default router;
