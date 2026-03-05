@@ -10,4 +10,9 @@
 // app.listen() is never called here; Vercel manages the server lifecycle.
 // ─────────────────────────────────────────────────────────────────────────────
 
+
+import seedRoute from './seed.route.js';      // ← add this
+router.use('/seed', seedRoute);   
+
+
 export { default } from '../src/server.js';
