@@ -40,7 +40,7 @@ router.get('/me', async (req: Request, res: Response) => {
 // ─── PUT /api/v1/users/me ─────────────────────────────────────────────────────
 // Called by: UserAPI.updateProfile(profileData)
 // Allows updating the User row (name/email) and/or the Profile row simultaneously
-router.put('/me', async (req: AuthRequest, res: Response) => {
+router.put('/me', async (req: Request, res: Response) => {
   try {
     const {
       name, email,
@@ -116,7 +116,7 @@ router.put('/me', async (req: AuthRequest, res: Response) => {
 // Called by: UserAPI.updateMetrics(metrics)
 // Schema: UserMetrics is an ARRAY model (one user → many metric snapshots over time)
 // Each call adds a new snapshot row — this is intentional for tracking history.
-router.post('/metrics', async (req: AuthRequest, res: Response) => {
+router.post('/metrics', async (req: Request, res: Response) => {
   try {
     const { weight, bodyFat, muscleMass, bmi, restingHeartRate, notes } = req.body;
 
@@ -142,7 +142,7 @@ router.post('/metrics', async (req: AuthRequest, res: Response) => {
 // ─── GET /api/v1/users/metrics/history ───────────────────────────────────────
 // Called by: UserAPI.getMetricsHistory()
 // Returns all metric snapshots ordered newest-first — perfect for charts
-router.get('/metrics/history', async (req: AuthRequest, res: Response) => {
+router.get('/metrics/history', async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt((req.query.limit as string) || '30'), 100);
 
