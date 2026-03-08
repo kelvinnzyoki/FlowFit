@@ -17,7 +17,8 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthenticatedUser;
-      activeSubscription?: {        
+      activeSubscription?: {
+        id: string;
         planSlug: string;
         status: string;
         isActive: boolean;
