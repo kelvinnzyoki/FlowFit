@@ -1,6 +1,6 @@
 import { PrismaClient, SubscriptionStatus, BillingInterval, SubscriptionEvent } from '@prisma/client';
-import type { PublicPlan, CurrentSubscription } from '../types/subscription.types';
-import { stripe, getOrCreateStripeCustomer } from './stripe.service';
+import type { PublicPlan, CurrentSubscription } from '../types/subscription.types.js';
+import { stripe, getOrCreateStripeCustomer } from './stripe.service.js';
 import Stripe from 'stripe';
 
 const prisma = new PrismaClient();
