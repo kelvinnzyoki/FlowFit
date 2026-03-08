@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { PrismaClient, SubscriptionStatus, BillingInterval } from '@prisma/client';
-import { constructWebhookEvent } from '../services/stripe.service';
+import { constructWebhookEvent } from '../services/stripe.service.js';
 import Stripe from 'stripe';
 
 const router = Router();
@@ -46,7 +46,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       const { userId, planId, interval } = session.metadata ?? {};
       if (!userId || !planId) return;
 
-      const stripeSub = await (await import('./webhook.routes')).fetchStripeSub(stripeSubId);
+      const stripeSub = await (await import('./webhook.routes.js')).fetchStripeSub(stripeSubId);
 
       await prisma.$transaction(async (tx) => {
         // Find the pending INCOMPLETE record created during checkout
