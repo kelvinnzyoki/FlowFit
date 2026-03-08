@@ -25,7 +25,7 @@ declare global {
           id: string;
           slug: string;
           name: string;
-          description: string;
+          description: string | null;
           monthlyPriceCents: number;
           yearlyPriceCents: number;
           trialDays: number;
