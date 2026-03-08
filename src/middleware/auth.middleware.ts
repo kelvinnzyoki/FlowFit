@@ -6,7 +6,7 @@ const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'change_me_access';
 
 export interface AuthenticatedUser {
   id: string;
-  name: string;
+  name: string | null;   // ← was string, must match Prisma's nullable field
   email: string;
   role: string;
 }
