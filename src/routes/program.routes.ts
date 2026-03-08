@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';;
 import prisma from '../config/db.js';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
 
@@ -8,7 +8,7 @@ router.use(authenticate);
 
 // ─── GET /api/v1/programs ────────────────────────────────────────────────────
 // Called by: ProgramsAPI.getPrograms(filters)
-router.get('/', async (req: AuthRequest, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const {
       difficulty,
@@ -57,7 +57,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
 // ─── GET /api/v1/programs/my-enrollments ─────────────────────────────────────
 // Called by: ProgramsAPI.getUserPrograms()
 // Must be defined BEFORE /:id
-router.get('/my-enrollments', async (req: AuthRequest, res: Response) => {
+router.get('/my-enrollments', async (req: Request, res: Response) => {
   try {
     const enrollments = await prisma.programEnrollment.findMany({
       where:   { userId: req.user!.id },
@@ -79,7 +79,7 @@ router.get('/my-enrollments', async (req: AuthRequest, res: Response) => {
 // ─── GET /api/v1/programs/:id ─────────────────────────────────────────────────
 // Called by: ProgramsAPI.getProgramById(id)
 // Returns the full nested structure: program → weeks → days → exercises
-router.get('/:id', async (req: AuthRequest, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const program = await prisma.program.findUnique({
       where:   { id: req.params.id },
@@ -115,7 +115,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
 
 // ─── POST /api/v1/programs/:id/enroll ───────────────────────────────────────
 // Called by: ProgramsAPI.enrollInProgram(programId)
-router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
+router.post('/:id/enroll', async (req: Request, res: Response) => {
   try {
     const programId = req.params.id;
     const userId    = req.user!.id;
@@ -149,7 +149,7 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response) => {
 // ─── PUT /api/v1/programs/enrollments/:enrollmentId/progress ─────────────────
 // Called by: ProgramsAPI.updateProgress(enrollmentId, data)
 // data: { currentWeek, currentDay, completedDays }
-router.put('/enrollments/:enrollmentId/progress', async (req: AuthRequest, res: Response) => {
+router.put('/enrollments/:enrollmentId/progress', async (req: Request, res: Response) => {
   try {
     const { enrollmentId } = req.params;
     const { currentWeek, currentDay, completedDays } = req.body;
