@@ -14,8 +14,8 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { PrismaClient, SubscriptionStatus } from '@prisma/client';
-import type { PlanSlug } from '../types/subscription.types';
-import { PLAN_HIERARCHY, planMeetsRequirement } from '../types/subscription.types';
+import type { PlanSlug } from '../types/subscription.types.js';
+import { PLAN_HIERARCHY, planMeetsRequirement } from '../types/subscription.types.js';
 
 const prisma = new PrismaClient();
 
