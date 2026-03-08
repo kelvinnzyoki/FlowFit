@@ -191,7 +191,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
 
 // ─── GET /api/v1/auth/me ────────────────────────────────────────────────────
 // Called by: AuthAPI.getCurrentUser() → checkAuth() in api.js
-router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/me', authenticate, async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({
       where:  { id: req.user!.id },
@@ -221,7 +221,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
 
 // ─── POST /api/v1/auth/change-password ──────────────────────────────────────
 // Called by: AuthAPI.changePassword()
-router.post('/change-password', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/change-password', authenticate, async (req: Request, res: Response) => {
   try {
     const { currentPassword, newPassword } = req.body;
 
