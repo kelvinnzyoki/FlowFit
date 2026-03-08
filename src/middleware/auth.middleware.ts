@@ -16,7 +16,12 @@ export interface AuthenticatedUser {
 declare global {
   namespace Express {
     interface Request {
-      user?: AuthenticatedUser;   // ← same named type, not a separate inline definition
+      user?: AuthenticatedUser;
+      activeSubscription?: {        
+        planSlug: string;
+        status: string;
+        isActive: boolean;
+      };
     }
   }
 }
