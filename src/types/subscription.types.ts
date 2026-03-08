@@ -61,11 +61,4 @@ export interface AuthenticatedUser {
   stripeCustomerId?: string | null;
 }
 
-declare global {
-  namespace Express {
-    interface Request {
-      user?: AuthenticatedUser;
-      activeSubscription?: CurrentSubscription | null;
-    }
-  }
-}
+
