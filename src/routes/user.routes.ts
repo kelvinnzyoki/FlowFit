@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import prisma from '../config/db.js';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
 
@@ -9,7 +9,7 @@ router.use(authenticate);
 // ─── GET /api/v1/users/me ─────────────────────────────────────────────────────
 // Called by: UserAPI.getProfile()
 // Returns user + their Profile (one-to-one) in one response
-router.get('/me', async (req: AuthRequest, res: Response) => {
+router.get('/me', async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({
       where:  { id: req.user!.id },
