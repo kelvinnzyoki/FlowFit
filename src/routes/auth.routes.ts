@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/db.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
-import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
+
 
 const router = Router();
 
