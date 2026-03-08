@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import rateLimit from 'express-rate-limit';
+import { rateLimit } from 'express-rate-limit';
 import { body, validationResult } from 'express-validator';
 import { requireAuth } from '../middleware/auth.middleware.js';
 import { BillingInterval } from '@prisma/client';
