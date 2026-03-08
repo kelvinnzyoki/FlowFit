@@ -292,7 +292,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
 
 // ─── Export helper used by handler (avoids circular import) ──────────────────
 export async function fetchStripeSub(id: string) {
-  const { stripe } = await import('../services/stripe.service');
+  const { stripe } = await import('../services/stripe.service.js');
   return stripe.subscriptions.retrieve(id);
 }
 
