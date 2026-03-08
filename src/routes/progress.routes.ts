@@ -1,7 +1,7 @@
 // Path: src/routes/progress.routes.ts
 import { Router, Request, Response } from 'express';
 import prisma from '../config/db.js';
-import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
+
 
 const router = Router();
 
