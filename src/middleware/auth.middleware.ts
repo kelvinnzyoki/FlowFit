@@ -19,13 +19,34 @@ declare global {
       user?: AuthenticatedUser;
       activeSubscription?: {
         id: string;
-        planSlug: string;
         status: string;
-        isActive: boolean;
         interval: string;
-        trialEndsAt?: Date | null;        // add if present in the object
-        currentPeriodEnd?: Date | null;   // add if present in the object
-        cancelAtPeriodEnd?: boolean;      // add if present in the object
+        plan: {
+          id: string;
+          slug: string;
+          name: string;
+          description: string;
+          monthlyPriceCents: number;
+          yearlyPriceCents: number;
+          trialDays: number;
+          maxWorkoutsPerMonth: number | null;
+          maxPrograms: number | null;
+          hasAdvancedAnalytics: boolean;
+          hasPersonalCoaching: boolean;
+          hasNutritionTracking: boolean;
+          hasOfflineAccess: boolean;
+          features: string[];
+          displayOrder: number;
+          isPopular: boolean;
+        };
+        trialEndsAt: string | null;
+        currentPeriodStart: string | null;
+        currentPeriodEnd: string | null;
+        cancelAtPeriodEnd: boolean;
+        cancelledAt: string | null;
+        scheduledPlanSlug: string | null;
+        activatedAt: string | null;
+        daysUntilRenewal: number | null;
       };
     }
   }
