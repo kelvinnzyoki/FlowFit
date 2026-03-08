@@ -17,6 +17,19 @@ import {
 import { PLAN_HIERARCHY } from '../types/subscription.types.js';
 import type { PlanSlug } from '../types/subscription.types.js';
 
+declare global {
+  namespace Express {
+    interface Request {
+      user?: {
+        id: string;
+        name: string;
+        email: string;
+        role: string;
+      };
+    }
+  }
+}
+
 const router = Router();
 
 // ─── Rate limiting — billing endpoints are high-value targets ─────────────────
