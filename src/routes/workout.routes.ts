@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import prisma from '../config/db.js';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
 
@@ -10,7 +10,7 @@ router.use(authenticate);
 // Called by: WorkoutsAPI.getExercises(filters)
 // Schema model: Exercise (not Workout — your schema uses Exercise for the library)
 // Supports: ?category=&difficulty=&muscle=&equipment=&limit=&page=
-router.get('/', async (req: AuthRequest, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const {
       category,
@@ -55,7 +55,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
 // ─── GET /api/v1/workouts/search ─────────────────────────────────────────────
 // Called by: WorkoutsAPI.searchExercises(query)
 // Must be defined BEFORE /:id so "search" is not treated as an id
-router.get('/search', async (req: AuthRequest, res: Response) => {
+router.get('/search', async (req: Request, res: Response) => {
   try {
     const { q } = req.query as { q?: string };
 
@@ -85,7 +85,7 @@ router.get('/search', async (req: AuthRequest, res: Response) => {
 
 // ─── GET /api/v1/workouts/:id ─────────────────────────────────────────────────
 // Called by: WorkoutsAPI.getExerciseById(id)
-router.get('/:id', async (req: AuthRequest, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const exercise = await prisma.exercise.findUnique({
       where: { id: req.params.id },
