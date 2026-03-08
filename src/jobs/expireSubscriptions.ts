@@ -9,7 +9,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { stripe } from '../services/stripe.service';
+import { stripe } from '../services/stripe.service.js';
 
 const prisma = new PrismaClient();
 
