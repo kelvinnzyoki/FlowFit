@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { body, validationResult } from 'express-validator';
-import { requireAuth } from '../middleware/auth.middleware';
+import { requireAuth } from '../middleware/auth.middleware.js';
 import { BillingInterval } from '@prisma/client';
 import {
   getPlans,
@@ -13,9 +13,9 @@ import {
   reactivateSubscription,
   getBillingPortalUrl,
   prisma,
-} from '../services/subscription.service';
-import { PLAN_HIERARCHY } from '../types/subscription.types';
-import type { PlanSlug } from '../types/subscription.types';
+} from '../services/subscription.service.js';
+import { PLAN_HIERARCHY } from '../types/subscription.types.js';
+import type { PlanSlug } from '../types/subscription.types.js';
 
 const router = Router();
 
