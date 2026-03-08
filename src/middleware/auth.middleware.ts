@@ -22,6 +22,10 @@ declare global {
         planSlug: string;
         status: string;
         isActive: boolean;
+        interval: string;
+        trialEndsAt?: Date | null;        // add if present in the object
+        currentPeriodEnd?: Date | null;   // add if present in the object
+        cancelAtPeriodEnd?: boolean;      // add if present in the object
       };
     }
   }
