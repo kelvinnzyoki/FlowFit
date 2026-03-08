@@ -4,13 +4,21 @@ import prisma from '../config/db.js';
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'change_me_access';
 
-export interface AuthRequest extends Request {
-  user?: {
-    id: string;
-    name: string;
-    email: string;
-    role: string;
-  };
+export interface AuthenticatedUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+}
+
+
+// ── 2. Global augmentation references AuthenticatedUser — not an inline object
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AuthenticatedUser;   // ← same named type, not a separate inline definition
+    }
+  }
 }
 
 
