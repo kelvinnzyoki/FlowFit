@@ -16,6 +16,8 @@ import { errorHandler, notFoundHandler } from './middleware/error.middleware.js'
 import { standardLimiter } from './middleware/rateLimiter.js';
 import prisma from './config/db.js';
 import redis from './config/redis.js';
+import subscriptionRoutes from './routes/subscription.routes.js';
+import webhookRoutes from './routes/webhook.routes.js';
 
 // ============================================
 // CREATE EXPRESS APP
@@ -24,6 +26,13 @@ const app: Application = express();  // ← no .default(), no namespace
 
 
 app.set('trust proxy', 1);
+
+
+app.use(
+  '/api/webhooks/stripe',
+  express.raw({ type: 'application/json' }),
+  webhookRoutes,
+);
 
 // ============================================
 // SECURITY MIDDLEWARE
