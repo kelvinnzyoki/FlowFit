@@ -265,7 +265,7 @@ router.get('/billing-portal', requireAuth, billingLimiter, async (req: Request, 
 router.post('/seed-plans', requireAuth, async (req: Request, res: Response) => {
   try {
     // Reuse the exact seeding logic from plans.seed.ts
-    const { PLAN_SEEDS } = await import('../config/plans.config.js'); // adjust path if needed
+    const { PLAN_SEEDS } = await import('../src/config/plans.config.js'); // adjust path if needed
 
     for (const plan of PLAN_SEEDS) {
       await prisma.plan.upsert({
