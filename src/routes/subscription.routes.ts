@@ -261,25 +261,4 @@ router.get('/billing-portal', requireAuth, billingLimiter, async (req: Request, 
 });
 
 
-// TEMP: one-time seed route – DELETE AFTER USE
-router.post('/seed-plans', requireAuth, async (req: Request, res: Response) => {
-  try {
-    // Reuse the exact seeding logic from plans.seed.ts
-    const { PLAN_SEEDS } = await import('../src/config/plans.config.js'); // adjust path if needed
-
-    for (const plan of PLAN_SEEDS) {
-      await prisma.plan.upsert({
-        where: { slug: plan.slug },
-        create: { ...plan, features: plan.features as any },
-        update: { ...plan, features: plan.features as any },
-      });
-    }
-
-    res.json({ success: true, message: 'Plans seeded successfully' });
-  } catch (err: any) {
-    console.error('Seed error:', err);
-    res.status(500).json({ error: 'Seeding failed', details: err.message });
-  }
-});
-
 export default router;
