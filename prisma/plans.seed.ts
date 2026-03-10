@@ -1,12 +1,12 @@
 /**
  * Seed the plans table.
- * Run: npx ts-node --esm src/config/plans.seed.ts
+ * Run: npx ts-node --esm src/config/plans.config.ts
  *
  * Safe to run multiple times — uses upsert on slug.
  */
 
 import { PrismaClient } from '@prisma/client';
-import { PLAN_SEEDS } from '../src/config/plans.config.ts';
+import { PLAN_SEEDS } from '../src/config/plans.config.js';
 
 const prisma = new PrismaClient();
 
