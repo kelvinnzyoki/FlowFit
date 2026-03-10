@@ -6,7 +6,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { PLAN_SEEDS } from './src/config/plans.config.js';
+import { PLAN_SEEDS } from './src/config/plans.config.ts';
 
 const prisma = new PrismaClient();
 
