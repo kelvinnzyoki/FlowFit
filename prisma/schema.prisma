@@ -71,6 +71,7 @@ model User {
   lastLogin       DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+mpesaTransactions  MpesaTransaction[]
 
   // Stripe customer ID — persists across plan changes
   stripeCustomerId String? @unique
@@ -128,6 +129,7 @@ model Plan {
   slug        String  @unique  // "free" | "pro" | "elite"
   name        String
   description String?
+mpesaTransactions  MpesaTransaction[]
 
   // Prices stored in cents to avoid float bugs
   monthlyPriceCents Int @default(0)
