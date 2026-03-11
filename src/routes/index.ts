@@ -45,7 +45,7 @@ import programRoutes      from './program.routes.js';
 import progressRoutes     from './progress.routes.js';
 import userRoutes         from './user.routes.js';
 import subscriptionRoutes from './subscription.routes.js';
-import seedRouter from './seed.routes.js';
+// import seedRouter from './seed.routes.js';
 
 
 
@@ -72,7 +72,7 @@ router.use('/programs',      programRoutes);
 router.use('/progress',      progressRoutes);
 router.use('/users',         userRoutes);
 router.use('/subscriptions', subscriptionRoutes);
-router.use('/admin', seedRouter);
+// router.use('/admin', seedRouter);
 
 
 export default router;
