@@ -52,6 +52,11 @@ enum SubscriptionEvent {
   WEBHOOK_RECEIVED
 }
 
+enum MpesaStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
 // ============================================================
 // CORE USER & AUTH
 // ============================================================
@@ -273,6 +278,35 @@ model Payment {
   @@index([subscriptionId])
   @@index([status])
   @@map("payments")
+}
+
+
+model MpesaTransaction {
+  id                 String      @id @default(uuid())
+  userId             String
+  planId             String
+  interval           BillingInterval
+
+  phone              String           // normalised 2547XXXXXXXX
+  amountKes          Int              // actual KES amount charged
+
+  checkoutRequestId  String      @unique   // from Safaricom STK push response
+  merchantRequestId  String?
+
+  status             MpesaStatus @default(PENDING)
+  mpesaReceiptNumber String?     // from callback on success
+  resultCode         String?     // raw Safaricom result code on failure
+  resultDesc         String?     // human-readable failure reason
+
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan               Plan        @relation(fields: [planId], references: [id])
+
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("mpesa_transactions")
 }
 
 // ============================================================
