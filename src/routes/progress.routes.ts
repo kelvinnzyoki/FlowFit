@@ -1,7 +1,7 @@
 // Path: src/routes/progress.routes.ts
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import prisma from '../config/db.js';
-import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
+import { authenticate } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
@@ -12,7 +12,7 @@ router.use(authenticate);
 // Schema fields on WorkoutLog: exerciseId, duration, date, sets, reps,
 //   caloriesBurned, heartRate, difficulty, notes, completed
 // NOT: workoutId, completedAt — those don't exist in your schema
-router.post('/', async (req: AuthRequest, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
     const {
@@ -64,7 +64,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
 
 // ─── GET /api/v1/progress/me ─────────────────────────────────────────────────
 // Called by: ProgressAPI.getUserProgress()
-router.get('/me', async (req: AuthRequest, res: Response) => {
+router.get('/me', async (req: Request, res: Response) => {
   try {
     const logs = await prisma.workoutLog.findMany({
       where:   { userId: req.user!.id },
@@ -82,7 +82,7 @@ router.get('/me', async (req: AuthRequest, res: Response) => {
 
 // ─── GET /api/v1/progress/stats ──────────────────────────────────────────────
 // Called by: ProgressAPI.getStats(period) — ?period=7d|30d|90d
-router.get('/stats', async (req: AuthRequest, res: Response) => {
+router.get('/stats', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
     const period = (req.query.period as string) || '30d';
@@ -133,7 +133,7 @@ router.get('/stats', async (req: AuthRequest, res: Response) => {
 
 // ─── GET /api/v1/progress/history ────────────────────────────────────────────
 // Called by: ProgressAPI.getWorkoutHistory(limit)
-router.get('/history', async (req: AuthRequest, res: Response) => {
+router.get('/history', async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseInt((req.query.limit as string) || '20'), 100);
 
@@ -154,7 +154,7 @@ router.get('/history', async (req: AuthRequest, res: Response) => {
 // ─── GET /api/v1/progress/streaks ────────────────────────────────────────────
 // Called by: ProgressAPI.getStreaks()
 // Reads directly from the dedicated Streak model in your schema
-router.get('/streaks', async (req: AuthRequest, res: Response) => {
+router.get('/streaks', async (req: Request, res: Response) => {
   try {
     const streak = await prisma.streak.findUnique({
       where: { userId: req.user!.id },
@@ -172,7 +172,7 @@ router.get('/streaks', async (req: AuthRequest, res: Response) => {
 
 // ─── GET /api/v1/progress/achievements ───────────────────────────────────────
 // Called by: ProgressAPI.getAchievements()
-router.get('/achievements', async (req: AuthRequest, res: Response) => {
+router.get('/achievements', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
 
@@ -306,4 +306,4 @@ async function checkAndGrantAchievements(userId: string) {
 }
 
 export default router;
-      
+                    
