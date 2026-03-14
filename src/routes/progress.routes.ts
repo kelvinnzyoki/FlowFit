@@ -1,7 +1,7 @@
 // Path: src/routes/progress.routes.ts
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import prisma from '../config/db.js';
-import { authenticate } from '../middleware/auth.middleware.js';
+import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
@@ -12,7 +12,7 @@ router.use(authenticate);
 // Schema fields on WorkoutLog: exerciseId, duration, date, sets, reps,
 //   caloriesBurned, heartRate, difficulty, notes, completed
 // NOT: workoutId, completedAt — those don't exist in your schema
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user!.id;
     const {
@@ -50,6 +50,11 @@ router.post('/', async (req: Request, res: Response) => {
     // Update the Streak model after every logged workout
     await updateStreak(userId);
 
+    // Check and grant any newly-earned achievements (non-fatal)
+    await checkAndGrantAchievements(userId).catch(err =>
+      console.error('Achievement check failed (non-fatal):', err)
+    );
+
     res.status(201).json({ success: true, data: log });
   } catch (error) {
     console.error('Log workout error:', error);
@@ -59,7 +64,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 // ─── GET /api/v1/progress/me ─────────────────────────────────────────────────
 // Called by: ProgressAPI.getUserProgress()
-router.get('/me', async (req: Request, res: Response) => {
+router.get('/me', async (req: AuthRequest, res: Response) => {
   try {
     const logs = await prisma.workoutLog.findMany({
       where:   { userId: req.user!.id },
@@ -77,7 +82,7 @@ router.get('/me', async (req: Request, res: Response) => {
 
 // ─── GET /api/v1/progress/stats ──────────────────────────────────────────────
 // Called by: ProgressAPI.getStats(period) — ?period=7d|30d|90d
-router.get('/stats', async (req: Request, res: Response) => {
+router.get('/stats', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user!.id;
     const period = (req.query.period as string) || '30d';
@@ -128,7 +133,7 @@ router.get('/stats', async (req: Request, res: Response) => {
 
 // ─── GET /api/v1/progress/history ────────────────────────────────────────────
 // Called by: ProgressAPI.getWorkoutHistory(limit)
-router.get('/history', async (req: Request, res: Response) => {
+router.get('/history', async (req: AuthRequest, res: Response) => {
   try {
     const limit = Math.min(parseInt((req.query.limit as string) || '20'), 100);
 
@@ -149,7 +154,7 @@ router.get('/history', async (req: Request, res: Response) => {
 // ─── GET /api/v1/progress/streaks ────────────────────────────────────────────
 // Called by: ProgressAPI.getStreaks()
 // Reads directly from the dedicated Streak model in your schema
-router.get('/streaks', async (req: Request, res: Response) => {
+router.get('/streaks', async (req: AuthRequest, res: Response) => {
   try {
     const streak = await prisma.streak.findUnique({
       where: { userId: req.user!.id },
@@ -167,7 +172,7 @@ router.get('/streaks', async (req: Request, res: Response) => {
 
 // ─── GET /api/v1/progress/achievements ───────────────────────────────────────
 // Called by: ProgressAPI.getAchievements()
-router.get('/achievements', async (req: Request, res: Response) => {
+router.get('/achievements', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user!.id;
 
@@ -231,4 +236,74 @@ async function updateStreak(userId: string) {
   }
 }
 
+
+// ─── Helper: evaluate and grant achievements after a workout ─────────────────
+async function checkAndGrantAchievements(userId: string) {
+  // Gather stats needed for evaluation
+  const [allLogs, streak, allAchievements, alreadyEarned] = await Promise.all([
+    prisma.workoutLog.findMany({ where: { userId } }),
+    prisma.streak.findUnique({ where: { userId } }),
+    prisma.achievement.findMany(),
+    prisma.userAchievement.findMany({
+      where: { userId },
+      select: { achievementId: true },
+    }),
+  ]);
+
+  const earnedIds = new Set(alreadyEarned.map(e => e.achievementId));
+
+  const stats = {
+    totalWorkouts:  allLogs.length,
+    totalCalories:  allLogs.reduce((s, l) => s + (l.caloriesBurned ?? 0), 0),
+    totalDuration:  allLogs.reduce((s, l) => s + l.duration, 0),
+    currentStreak:  streak?.currentStreak ?? 0,
+    longestStreak:  streak?.longestStreak ?? 0,
+  };
+
+  const toGrant: string[] = [];
+
+  for (const ach of allAchievements) {
+    if (earnedIds.has(ach.id)) continue; // already earned
+
+    const req = ach.requirement as Record<string, unknown>;
+    if (!req) continue;
+
+    let earned = false;
+
+    // Support multiple requirement shapes commonly used in fitness apps
+    const type  = (req.type  as string | undefined)?.toLowerCase() ?? '';
+    const field = (req.field as string | undefined)?.toLowerCase() ?? '';
+    const val   = Number(req.value ?? req.count ?? req.target ?? 0);
+
+    if (type === 'totalworkouts'  || field === 'totalworkouts'  || req.workouts  !== undefined)
+      earned = stats.totalWorkouts  >= Number(req.workouts  ?? val);
+    else if (type === 'totalcalories' || field === 'totalcalories' || req.calories !== undefined)
+      earned = stats.totalCalories  >= Number(req.calories  ?? val);
+    else if (type === 'totalduration' || field === 'totalduration' || req.duration !== undefined)
+      earned = stats.totalDuration  >= Number(req.duration  ?? val);
+    else if (type === 'streak'        || field === 'streak'        || req.streak   !== undefined)
+      earned = stats.currentStreak  >= Number(req.streak    ?? val);
+    else if (val > 0) {
+      // Fallback: if requirement just has a numeric value, assume totalWorkouts
+      earned = stats.totalWorkouts >= val;
+    }
+
+    if (earned) toGrant.push(ach.id);
+  }
+
+  if (!toGrant.length) return;
+
+  // Upsert so we never duplicate (@@unique on [userId, achievementId])
+  await Promise.all(
+    toGrant.map(achievementId =>
+      prisma.userAchievement.upsert({
+        where:  { userId_achievementId: { userId, achievementId } },
+        update: {},
+        create: { userId, achievementId },
+      })
+    )
+  );
+}
+
 export default router;
+      
