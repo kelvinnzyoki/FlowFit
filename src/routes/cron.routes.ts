@@ -1,22 +1,20 @@
-/**
- * FLOWFIT — Cron Job HTTP Handlers
- *
- * These routes are called by Vercel Cron Jobs on a schedule (see vercel.json).
- * Each endpoint runs one type of background work.
- *
- * Security: CRON_SECRET header required — set the same value in:
- *   - Your Vercel environment variables (CRON_SECRET)
- *   - vercel.json cron job config (added automatically by Vercel)
- *
- * Vercel sets x-vercel-cron-signature on all cron-triggered requests.
- * We also accept Authorization: Bearer <CRON_SECRET> for local testing.
- *
- * Cron schedule (set in vercel.json):
- *   /api/v1/internal/cron/reminders      — "0 8 * * *"   (daily at 08:00 UTC)
- *   /api/v1/internal/cron/renewals       — "0 * * * *"   (every hour)
- *   /api/v1/internal/cron/retries        — "0 */6 * * *" (every 6 hours)
- *   /api/v1/internal/cron/expiry         — "*/30 * * * *"(every 30 minutes)
- */
+// FLOWFIT — Cron Job HTTP Handlers
+//
+// These routes are called by Vercel Cron Jobs on a schedule (see vercel.json).
+// Each endpoint runs one type of background work.
+//
+// Security: CRON_SECRET header required — set the same value in:
+//   - Your Vercel environment variables (CRON_SECRET)
+//   - vercel.json cron job config (added automatically by Vercel)
+//
+// Vercel sets x-vercel-cron-signature on all cron-triggered requests.
+// We also accept Authorization: Bearer <CRON_SECRET> for local testing.
+//
+// Cron schedule (set in vercel.json):
+//   /api/v1/internal/cron/reminders  — "0 8 * * *"    (daily at 08:00 UTC)
+//   /api/v1/internal/cron/renewals   — "0 * * * *"    (every hour)
+//   /api/v1/internal/cron/retries    — "0 */6 * * *"  (every 6 hours)
+//   /api/v1/internal/cron/expiry     — "*/30 * * * *" (every 30 minutes)
 
 import { Router, Request, Response } from 'express';
 import {
