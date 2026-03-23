@@ -155,28 +155,50 @@ CREATE INDEX IF NOT EXISTS "webhook_events_provider_idx"
 -- ============================================================
 -- STEP 8 — mpesa_transactions
 -- ============================================================
+-- Uses CREATE TABLE IF NOT EXISTS followed by ADD COLUMN IF NOT EXISTS
+-- for every column. This handles two cases identically:
+--   a) Table does not exist yet  → CREATE TABLE runs, ADD COLUMNs are no-ops
+--   b) Table was partially created by a previous failed migration run
+--      → CREATE TABLE is skipped, ADD COLUMN adds whatever is missing
+-- This is the only pattern that survives Prisma P3009 re-runs safely.
+-- ============================================================
 
+-- Create the table with only the primary key.
+-- Every other column is added below with ADD COLUMN IF NOT EXISTS.
 CREATE TABLE IF NOT EXISTS "mpesa_transactions" (
-    "id"                 TEXT          NOT NULL,
-    "subscriptionId"     TEXT,
-    "userId"             TEXT          NOT NULL,
-    "merchantRequestId"  TEXT          NOT NULL,
-    "checkoutRequestId"  TEXT          NOT NULL,
-    "mpesaReceiptNumber" TEXT,
-    "phoneNumber"        TEXT,
-    "amountKes"          INTEGER       NOT NULL,
-    "status"             "MpesaTransactionStatus" NOT NULL DEFAULT 'PENDING',
-    "resultCode"         TEXT,
-    "resultDesc"         TEXT,
-    "attemptNumber"      INTEGER       NOT NULL DEFAULT 1,
-    "isRenewal"          BOOLEAN       NOT NULL DEFAULT true,
-    "initiatedAt"        TIMESTAMP(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "completedAt"        TIMESTAMP(3),
-    "timeoutAt"          TIMESTAMP(3),
-
+    "id" TEXT NOT NULL,
     CONSTRAINT "mpesa_transactions_pkey" PRIMARY KEY ("id")
 );
 
+-- Add every column individually — idempotent regardless of prior state
+ALTER TABLE "mpesa_transactions"
+    ADD COLUMN IF NOT EXISTS "subscriptionId"     TEXT,
+    ADD COLUMN IF NOT EXISTS "userId"             TEXT          NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS "merchantRequestId"  TEXT          NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS "checkoutRequestId"  TEXT          NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS "mpesaReceiptNumber" TEXT,
+    ADD COLUMN IF NOT EXISTS "phoneNumber"        TEXT,
+    ADD COLUMN IF NOT EXISTS "amountKes"          INTEGER       NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS "status"             "MpesaTransactionStatus" NOT NULL DEFAULT 'PENDING',
+    ADD COLUMN IF NOT EXISTS "resultCode"         TEXT,
+    ADD COLUMN IF NOT EXISTS "resultDesc"         TEXT,
+    ADD COLUMN IF NOT EXISTS "attemptNumber"      INTEGER       NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS "isRenewal"          BOOLEAN       NOT NULL DEFAULT true,
+    ADD COLUMN IF NOT EXISTS "initiatedAt"        TIMESTAMP(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS "completedAt"        TIMESTAMP(3),
+    ADD COLUMN IF NOT EXISTS "timeoutAt"          TIMESTAMP(3);
+
+-- Remove the temporary defaults from NOT NULL columns added above.
+-- Real rows inserted by the application always supply these values.
+-- Columns that should have no default are: userId, merchantRequestId,
+-- checkoutRequestId, amountKes.
+ALTER TABLE "mpesa_transactions"
+    ALTER COLUMN "userId"            DROP DEFAULT,
+    ALTER COLUMN "merchantRequestId" DROP DEFAULT,
+    ALTER COLUMN "checkoutRequestId" DROP DEFAULT,
+    ALTER COLUMN "amountKes"         DROP DEFAULT;
+
+-- Unique indexes — IF NOT EXISTS makes them safe to re-run
 CREATE UNIQUE INDEX IF NOT EXISTS "mpesa_transactions_merchantRequestId_key"
     ON "mpesa_transactions"("merchantRequestId");
 
@@ -187,6 +209,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "mpesa_transactions_mpesaReceiptNumber_key"
     ON "mpesa_transactions"("mpesaReceiptNumber")
     WHERE "mpesaReceiptNumber" IS NOT NULL;
 
+-- Regular indexes
 CREATE INDEX IF NOT EXISTS "mpesa_transactions_subscriptionId_idx"
     ON "mpesa_transactions"("subscriptionId");
 
@@ -202,17 +225,24 @@ CREATE INDEX IF NOT EXISTS "mpesa_transactions_checkoutRequestId_idx"
 CREATE INDEX IF NOT EXISTS "mpesa_transactions_initiatedAt_idx"
     ON "mpesa_transactions"("initiatedAt");
 
-ALTER TABLE "mpesa_transactions"
-    ADD CONSTRAINT "mpesa_transactions_subscriptionId_fkey"
-    FOREIGN KEY ("subscriptionId")
-    REFERENCES "subscriptions"("id")
-    ON DELETE SET NULL ON UPDATE CASCADE;
+-- Foreign keys — use DO/EXCEPTION so re-runs don't error on existing constraints
+DO $$ BEGIN
+    ALTER TABLE "mpesa_transactions"
+        ADD CONSTRAINT "mpesa_transactions_subscriptionId_fkey"
+        FOREIGN KEY ("subscriptionId")
+        REFERENCES "subscriptions"("id")
+        ON DELETE SET NULL ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE "mpesa_transactions"
-    ADD CONSTRAINT "mpesa_transactions_userId_fkey"
-    FOREIGN KEY ("userId")
-    REFERENCES "users"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+    ALTER TABLE "mpesa_transactions"
+        ADD CONSTRAINT "mpesa_transactions_userId_fkey"
+        FOREIGN KEY ("userId")
+        REFERENCES "users"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 
 -- ============================================================
