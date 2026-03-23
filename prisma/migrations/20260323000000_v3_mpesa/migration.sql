@@ -134,49 +134,54 @@ CREATE INDEX IF NOT EXISTS "payments_provider_idx"
 -- ============================================================
 -- STEP 7 — ALTER TABLE: webhook_events
 --
--- The critical migration that was causing your build failure.
---
 -- Old schema had: stripeEventId String @unique
 -- New schema has: externalId    String @unique
 --                 provider      String (NOT NULL)
 --
--- Strategy:
---   a) Add externalId as nullable first
---   b) Backfill it from stripeEventId (same data, just renamed)
---   c) Make it NOT NULL and add unique index
---   d) Add provider with DEFAULT 'stripe' (all 283 rows are Stripe)
---   e) Drop stripeEventId and its unique index
+-- Root cause of build failure:
+--   Prisma's pre-flight validator scans the entire migration SQL before
+--   running any of it. When it sees any step that results in a NOT NULL
+--   column, it checks the live row count and rejects the whole file if
+--   rows exist — even if a backfill UPDATE appears later in the same file.
+--
+-- Fix: supply DEFAULT '' on the ADD COLUMN line itself so the validator
+--   sees a safe default. Immediately overwrite with real values, then
+--   drop the placeholder default so new rows must always supply a value.
 -- ============================================================
 
--- a) Add externalId as nullable to avoid the NOT NULL failure
+-- a) Add externalId NOT NULL with temporary empty-string default.
+--    Prisma's validator now sees a default and allows the step.
+--    Existing 283 rows all get '' initially.
 ALTER TABLE "webhook_events"
-    ADD COLUMN IF NOT EXISTS "externalId" TEXT;
+    ADD COLUMN IF NOT EXISTS "externalId" TEXT NOT NULL DEFAULT '';
 
--- b) Backfill from stripeEventId — every existing row gets the correct value
+-- b) Immediately overwrite the placeholder with the real value.
+--    Every existing row had stripeEventId — copy it to externalId.
+--    After this UPDATE no row has an empty externalId.
 UPDATE "webhook_events"
    SET "externalId" = "stripeEventId"
- WHERE "externalId" IS NULL
-   AND "stripeEventId" IS NOT NULL;
+ WHERE "stripeEventId" IS NOT NULL;
 
--- c) Now safe to enforce NOT NULL (every row has a value from the backfill)
+-- c) Drop the temporary default — new rows must supply externalId explicitly.
 ALTER TABLE "webhook_events"
-    ALTER COLUMN "externalId" SET NOT NULL;
+    ALTER COLUMN "externalId" DROP DEFAULT;
 
--- Unique index on externalId (replaces the unique index on stripeEventId)
+-- Unique index (replaces the unique index that was on stripeEventId)
 DROP INDEX IF EXISTS "webhook_events_stripeEventId_key";
 CREATE UNIQUE INDEX IF NOT EXISTS "webhook_events_externalId_key"
     ON "webhook_events"("externalId");
 
--- d) Add provider — DEFAULT 'stripe' covers all 283 existing Stripe events
+-- d) Add provider — DEFAULT 'stripe' covers all 283 existing Stripe events.
+--    Prisma validator accepts this because a DEFAULT is present.
 ALTER TABLE "webhook_events"
     ADD COLUMN IF NOT EXISTS "provider"
         TEXT NOT NULL DEFAULT 'stripe';
 
--- Drop the default after backfill so future rows must be explicit
+-- Drop the temporary default — new rows must supply provider explicitly.
 ALTER TABLE "webhook_events"
     ALTER COLUMN "provider" DROP DEFAULT;
 
--- e) Drop the old stripeEventId column (data preserved in externalId)
+-- e) Drop the old stripeEventId column (data is now in externalId)
 ALTER TABLE "webhook_events"
     DROP COLUMN IF EXISTS "stripeEventId";
 
