@@ -362,8 +362,8 @@ export async function createMpesaSubscription(
     data: {
       subscriptionId:    subscription.id,
       userId,
-      merchantRequestId: stk.MerchantRequestID,
-      checkoutRequestId: stk.CheckoutRequestID,
+      merchantRequestId: stk.merchantRequestId,
+      checkoutRequestId: stk.checkoutRequestId,
       phoneNumber:       phone,
       amountKes,
       status:            'PENDING',
@@ -380,10 +380,10 @@ export async function createMpesaSubscription(
   }).catch(() => {/* non-critical */});
 
   return {
-    merchantRequestId: stk.MerchantRequestID,
-    checkoutRequestId: stk.CheckoutRequestID,
+    merchantRequestId: stk.merchantRequestId,
+    checkoutRequestId: stk.checkoutRequestId,
     subscriptionId:    subscription.id,
-    customerMessage:   stk.CustomerMessage,
+    customerMessage:   stk.customerMessage,
   };
 }
 
@@ -677,8 +677,8 @@ export async function runMpesaRenewals(): Promise<{
           data: {
             subscriptionId:    sub.id,
             userId:            sub.userId,
-            merchantRequestId: stk.MerchantRequestID,
-            checkoutRequestId: stk.CheckoutRequestID,
+            merchantRequestId: stk.merchantRequestId,
+            checkoutRequestId: stk.checkoutRequestId,
             phoneNumber:       phone,
             amountKes,
             status:            'PENDING',
@@ -694,7 +694,7 @@ export async function runMpesaRenewals(): Promise<{
             event:          'MPESA_STK_INITIATED',
             previousStatus: sub.status,
             newStatus:      sub.status,
-            metadata:       { stkCheckoutRequestId: stk.CheckoutRequestID, isRenewal: true },
+            metadata:       { stkcheckoutRequestId: stk.checkoutRequestID, isRenewal: true },
           },
         });
       });
@@ -771,8 +771,8 @@ export async function runRetries(): Promise<{
           data: {
             subscriptionId:    sub.id,
             userId:            sub.userId,
-            merchantRequestId: stk.MerchantRequestID,
-            checkoutRequestId: stk.CheckoutRequestID,
+            merchantRequestId: stk.merchantRequestId,
+            checkoutRequestId: stk.checkoutRequestId,
             phoneNumber:       phone,
             amountKes,
             status:            'PENDING',
