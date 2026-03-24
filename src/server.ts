@@ -18,6 +18,9 @@ import prisma from './config/db.js';
 import redis from './config/redis.js';
 import subscriptionRoutes from './routes/subscription.routes.js';
 import webhookRoutes from './routes/webhook.routes.js';
+import cookieParser from 'cookie-parser';
+
+
 
 // ============================================
 // CREATE EXPRESS APP
@@ -76,6 +79,8 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 app.use('/api', standardLimiter);
+
+app.use(cookieParser());  
 
 // ============================================
 // HEALTH CHECK
