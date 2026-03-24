@@ -13,7 +13,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import rateLimit from 'express-rate-limit';
+import { rateLimit } from 'express-rate-limit';   // ← named import, NOT default
 import { body, validationResult } from 'express-validator';
 import { requireAuth } from '../middleware/auth.middleware.js';
 import { BillingInterval } from '@prisma/client';
@@ -36,6 +36,7 @@ import prisma from '../config/db.js';
 const router = Router();
 
 // ── Rate limiters ──────────────────────────────────────────────────────────────
+// Rate limiters — correct v7+ syntax
 const billingLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
