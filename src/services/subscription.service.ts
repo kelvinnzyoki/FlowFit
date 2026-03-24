@@ -694,7 +694,7 @@ export async function runMpesaRenewals(): Promise<{
             event:          'MPESA_STK_INITIATED',
             previousStatus: sub.status,
             newStatus:      sub.status,
-            metadata:       { stkcheckoutRequestId: stk.checkoutRequestID, isRenewal: true },
+            metadata:       { stkcheckoutRequestId: stk.checkoutRequestId, isRenewal: true },
           },
         });
       });
