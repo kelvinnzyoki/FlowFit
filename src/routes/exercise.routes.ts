@@ -1,5 +1,5 @@
-import express from "express";
-import { fetchExercises } from "./exercise.service";
+import { Request, Response, NextFunction } from 'express';
+import { fetchExercises } from "./exercise.service.js";
 
 const router = express.Router();
 
