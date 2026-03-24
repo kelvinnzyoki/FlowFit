@@ -46,7 +46,8 @@ import progressRoutes     from './progress.routes.js';
 import userRoutes         from './user.routes.js';
 import subscriptionRoutes from './subscription.routes.js';
 import seedRouter from './seed.routes.js';
-
+import exerciseRoutes from './exercise.routes.js';
+   
 
 
 const router = Router();
@@ -72,6 +73,8 @@ router.use('/programs',      programRoutes);
 router.use('/progress',      progressRoutes);
 router.use('/users',         userRoutes);
 router.use('/subscriptions', subscriptionRoutes);
+router.use('/exercises', exerciseRoutes);
+
 router.use('/admin', seedRouter);
 
 
