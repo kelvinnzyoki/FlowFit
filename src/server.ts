@@ -19,6 +19,10 @@ import redis from './config/redis.js';
 import subscriptionRoutes from './routes/subscription.routes.js';
 import webhookRoutes from './routes/webhook.routes.js';
 import exerciseRoutes from "./routes/exercise.routes.js";
+import cookieParser from 'cookie-parser';   
+
+
+
 
 
 
@@ -82,6 +86,8 @@ if (process.env.NODE_ENV === 'development') {
 app.use('/api', standardLimiter);
 
 app.use("/api/exercises", exerciseRoutes);
+
+app.use(cookieParser());
 
 // ============================================
 // HEALTH CHECK
