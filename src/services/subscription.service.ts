@@ -34,7 +34,7 @@ import type { PublicPlan, CurrentSubscription } from '../types/subscription.type
 import { stripe, getOrCreateStripeCustomer } from './stripe.service.js';
 import {
   initiateStkPush,
-  normalizePhone,
+  normalisePhone,
 } from './mpesa.service.js';
 import Stripe from 'stripe';
 
@@ -288,7 +288,7 @@ export async function createMpesaSubscription(
   }
 
   // Normalise phone to 2547XXXXXXXX format required by Daraja
-  const phone = normalizePhone(rawPhone);
+  const phone = normalisePhone(rawPhone);
 
   // Persist the subscription immediately so we have an ID for the transaction
   const subscription = await prisma.subscription.create({
@@ -319,7 +319,7 @@ export async function createMpesaSubscription(
     amountKes,
     `FlowFit-${plan.slug.toUpperCase()}`,
     `FlowFit ${plan.name} ${interval.toLowerCase()}`,
-    callbackUrl,
+    
   );
 
   // Record the transaction attempt
@@ -327,8 +327,8 @@ export async function createMpesaSubscription(
     data: {
       subscriptionId:    subscription.id,
       userId,
-      merchantRequestId: stk.MerchantRequestID,
-      checkoutRequestId: stk.CheckoutRequestID,
+      merchantRequestId: stk.merchantRequestID,
+      checkoutRequestId: stk.checkoutRequestID,
       phoneNumber:       phone,
       amountKes,
       status:            'PENDING',
@@ -345,10 +345,10 @@ export async function createMpesaSubscription(
   }).catch(() => {/* non-critical */});
 
   return {
-    merchantRequestId: stk.MerchantRequestID,
-    checkoutRequestId: stk.CheckoutRequestID,
+    merchantRequestId: stk.merchantRequestID,
+    checkoutRequestId: stk.checkoutRequestID,
     subscriptionId:    subscription.id,
-    customerMessage:   stk.CustomerMessage,
+    customerMessage:   stk.customerMessage,
   };
 }
 
@@ -628,7 +628,7 @@ export async function runMpesaRenewals(): Promise<{
         amountKes,
         `FlowFit-${sub.plan.slug.toUpperCase()}`,
         `FlowFit renewal ${sub.plan.name}`,
-        callbackUrl,
+        
       );
 
       const attempts = (sub.mpesaRenewalAttempts ?? 0) + 1;
@@ -646,8 +646,8 @@ export async function runMpesaRenewals(): Promise<{
           data: {
             subscriptionId:    sub.id,
             userId:            sub.userId,
-            merchantRequestId: stk.MerchantRequestID,
-            checkoutRequestId: stk.CheckoutRequestID,
+            merchantRequestId: stk.merchantRequestID,
+            checkoutRequestId: stk.checkoutRequestID,
             phoneNumber:       phone,
             amountKes,
             status:            'PENDING',
@@ -728,7 +728,7 @@ export async function runRetries(): Promise<{
         amountKes,
         `FlowFit-${sub.plan.slug.toUpperCase()}`,
         `FlowFit retry ${attempts}`,
-        callbackUrl,
+        
       );
 
       await prisma.$transaction(async (db) => {
@@ -744,8 +744,8 @@ export async function runRetries(): Promise<{
           data: {
             subscriptionId:    sub.id,
             userId:            sub.userId,
-            merchantRequestId: stk.MerchantRequestID,
-            checkoutRequestId: stk.CheckoutRequestID,
+            merchantRequestId: stk.merchantRequestID,
+            checkoutRequestId: stk.checkoutRequestID,
             phoneNumber:       phone,
             amountKes,
             status:            'PENDING',
