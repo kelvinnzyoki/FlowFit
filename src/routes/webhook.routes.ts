@@ -106,7 +106,8 @@ async function processEvent(event: Stripe.Event): Promise<void> {
     }
 
     // ── Invoice paid — subscription renewed ──────────────────────────────────
-    case 'invoice.payment_succeeded': {
+    case 'invoice.payment_succeeded':
+      const newStatus: SubscriptionStatus = 'ACTIVE'; {
       const invoice = event.data.object as Stripe.Invoice;
       if (!invoice.subscription) return;
 
@@ -210,7 +211,17 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       if (!sub) return;
 
       const prevStatus = sub.status;
-      const newStatus  = mapStripeStatus(stripeSub.status);
+      let newStatus = mapStripeStatus(stripeSub.status);
+
+
+      // OVERRIDE: if subscription is paid and valid
+
+      if (
+  stripeSub.status === 'active' ||
+  stripeSub.status === 'trialing'
+) {
+  newStatus = stripeSub.status === 'trialing' ? 'TRIALING' : 'ACTIVE';
+}
 
       // Detect trial → active conversion
       const prevAttrs      = event.data.previous_attributes as any;
