@@ -79,25 +79,23 @@ router.post('/callback', async (req: Request, res: Response) => {
 
     const subscription = mpesaTx.subscription;
 
-    // ─────────────────────────────────────────────────────────────────────────
+    
     // ✅ SUCCESS (AUTHORITATIVE + FORCE STATE)
-    // ─────────────────────────────────────────────────────────────────────────
-    if (resultCode === '0') {
-      if (!receiptNumber) throw new Error('Missing MpesaReceiptNumber on success callback');
+if (resultCode === '0') {
+  if (!receiptNumber) throw new Error('Missing MpesaReceiptNumber on success callback');
 
-      await handleMpesaSuccess(checkoutRequestId, receiptNumber, amount ?? 0);
+  await handleMpesaSuccess(checkoutRequestId, receiptNumber, amount ?? 0);
 
-      // 🔥 EXTRA SAFETY: force correct state
-      await prisma.subscription.update({
-        where: { id: subscription.id },
-        data: {
-          status: 'ACTIVE',                    // Force ACTIVE (remove isTrial logic)
-          lastPaymentDate: new Date(),         // Use correct field name from your schema
-        },
-      });
+  // 🔥 EXTRA SAFETY: force correct state
+  await prisma.subscription.update({
+    where: { id: subscription.id },
+    data: {
+      status: 'ACTIVE',   // This is the critical line that clears PAST_DUE
+    },
+  });
 
-      console.log(`[mpesa-webhook] SUCCESS processed for ${checkoutRequestId}`);
-    }
+  console.log(`[mpesa-webhook] SUCCESS processed for ${checkoutRequestId}`);
+}
 
     // ─────────────────────────────────────────────────────────────────────────
     // ⚠️ FAILURE (STRICTLY CONTROLLED)
