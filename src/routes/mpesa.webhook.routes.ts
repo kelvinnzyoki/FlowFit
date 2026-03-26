@@ -34,7 +34,7 @@ router.post('/validation', (req: Request, res: Response) => {
  
       // ── STK Push Callback ──────────────────────────────────────────────────────────
 router.post('/callback', async (req: Request, res: Response) => {
-  // Always ACK immediately to Safaricom
+  // Always ACK immediately
   res.json({ ResultCode: '0', ResultDesc: 'Accepted' });
 
   if (!validateSafaricomIp(req)) {
@@ -52,7 +52,10 @@ router.post('/callback', async (req: Request, res: Response) => {
 
   const { checkoutRequestId, resultCode, resultDesc, receiptNumber, amount } = parsed;
 
-  // Idempotency check
+  // Safe success check (handles both string '0' and number 0)
+  const isSuccess = String(resultCode) === '0';
+
+  // Idempotency
   const existing = await prisma.webhookEvent.findUnique({
     where: { externalId: checkoutRequestId },
   });
@@ -62,28 +65,25 @@ router.post('/callback', async (req: Request, res: Response) => {
   }
 
   try {
-    // Find M-Pesa transaction + linked subscription
+    // Find via MpesaTransaction + subscription
     const mpesaTx = await prisma.mpesaTransaction.findUnique({
       where: { checkoutRequestId },
       include: { subscription: true },
     });
 
     if (!mpesaTx || !mpesaTx.subscription) {
-      console.warn(`[mpesa-webhook] No subscription found for checkoutRequestId: ${checkoutRequestId}`);
+      console.warn(`[mpesa-webhook] No subscription found for ${checkoutRequestId}`);
       return;
     }
 
     const subscription = mpesaTx.subscription;
-
-    // SUCCESS - handle both string '0' and number 0 safely
-    const isSuccess = resultCode === '0' || resultCode === 0;
 
     if (isSuccess) {
       if (!receiptNumber) throw new Error('Missing receiptNumber on success');
 
       await handleMpesaSuccess(checkoutRequestId, receiptNumber, amount ?? 0);
 
-      // FORCE ACTIVE — this is what hides the "PAYMENT FAILED" banner
+      // FORCE ACTIVE — this clears the PAST_DUE banner on frontend
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: {
@@ -93,11 +93,10 @@ router.post('/callback', async (req: Request, res: Response) => {
 
       console.log(`[mpesa-webhook] ✅ SUCCESS: Subscription ${subscription.id} set to ACTIVE`);
     } 
-    // FAILURE
     else {
       console.log(`[mpesa-webhook] ❌ FAILURE for ${checkoutRequestId}: ${resultDesc}`);
 
-      // Never downgrade already good subscriptions
+      // Never downgrade active/trialing subscriptions
       if (['ACTIVE', 'TRIALING'].includes(subscription.status)) {
         console.log(`[mpesa-webhook] Ignored failure — keeping ${subscription.status}`);
         await handleMpesaFailure(checkoutRequestId, String(resultCode), resultDesc);
@@ -116,12 +115,11 @@ router.post('/callback', async (req: Request, res: Response) => {
     data: {
       externalId: checkoutRequestId,
       provider: 'mpesa',
-      eventType: (resultCode === '0' || resultCode === 0) ? 'stk_success' : 'stk_failed',
+      eventType: isSuccess ? 'stk_success' : 'stk_failed',
       responseStatus: 200,
     },
   }).catch(e => console.error('[mpesa-webhook] Failed to log event:', e));
 });
-
 // ── C2B Confirmation URL ───────────────────────────────────────────────────────
 router.post('/confirmation', async (req: Request, res: Response) => {
   console.log('[mpesa-webhook] C2B confirmation received:', JSON.stringify(req.body));
