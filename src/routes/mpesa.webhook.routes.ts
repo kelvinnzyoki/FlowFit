@@ -112,7 +112,7 @@ router.post('/callback', async (req: Request, res: Response) => {
     data: {
       externalId: checkoutRequestId,
       provider: 'mpesa',
-      eventType: resultCode === 0 ? 'stk_success' : 'stk_failed',
+      eventType: (resultCode === '0' || resultCode === 0) ? 'stk_success' : 'stk_failed',
       responseStatus: 200,
     },
   }).catch(e => console.error('[mpesa-webhook] Failed to log event:', e));
