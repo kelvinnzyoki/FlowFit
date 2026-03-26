@@ -36,8 +36,8 @@ const app: Application = express();  // ← no .default(), no namespace
 app.set('trust proxy', 1);
 
 
-app.use('/api/webhooks/mpesa/callback', express.raw({ type: 'application/json' }), mpesaWebhookRouter);
-app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhookRouter);
+app.use('/api/webhooks/mpesa/callback', express.raw({ type: 'application/json' }), mpesaWebhookRoutes);
+app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhookRoutes);
 
 // ============================================
 // SECURITY MIDDLEWARE
