@@ -31,9 +31,9 @@ router.post('/validation', (req: Request, res: Response) => {
   return res.json({ ResultCode: '0', ResultDesc: 'Accepted' });
 });
 
-// ── STK Push Callback ──────────────────────────────────────────────────────────
+ // ── STK Push Callback ──────────────────────────────────────────────────────────
 router.post('/callback', async (req: Request, res: Response) => {
-  // Always ACK immediately
+  // Always ACK immediately to Safaricom
   res.json({ ResultCode: '0', ResultDesc: 'Accepted' });
 
   if (!validateSafaricomIp(req)) {
@@ -45,31 +45,26 @@ router.post('/callback', async (req: Request, res: Response) => {
   try {
     parsed = parseStkCallback(req.body);
   } catch (err: any) {
-    console.error('[mpesa-webhook] Failed to parse callback:', err.message, JSON.stringify(req.body));
+    console.error('[mpesa-webhook] Failed to parse callback:', err.message);
     return;
   }
 
   const { checkoutRequestId, resultCode, resultDesc, receiptNumber, amount } = parsed;
 
-  // ── Idempotency ────────────────────────────────────────────────────────────
+  // Idempotency
   const existing = await prisma.webhookEvent.findUnique({
     where: { externalId: checkoutRequestId },
   });
-
   if (existing) {
-    console.log(`[mpesa-webhook] Duplicate callback for ${checkoutRequestId} — skipped`);
+    console.log(`[mpesa-webhook] Duplicate callback skipped for ${checkoutRequestId}`);
     return;
   }
 
-  let error: string | null = null;
-
   try {
-    // 🔍 Find subscription via related MpesaTransaction (CRITICAL FIX)
+    // Find the M-Pesa transaction and its linked subscription
     const mpesaTx = await prisma.mpesaTransaction.findUnique({
       where: { checkoutRequestId },
-      include: {
-        subscription: true,
-      },
+      include: { subscription: true },
     });
 
     if (!mpesaTx || !mpesaTx.subscription) {
@@ -79,59 +74,49 @@ router.post('/callback', async (req: Request, res: Response) => {
 
     const subscription = mpesaTx.subscription;
 
-    
-    // ✅ SUCCESS (AUTHORITATIVE + FORCE STATE)
-if (resultCode === '0') {
-  if (!receiptNumber) throw new Error('Missing MpesaReceiptNumber on success callback');
+    if (resultCode === 0) {   // Success (ResultCode is number 0)
+      if (!receiptNumber) throw new Error('Missing receiptNumber on success');
 
-  await handleMpesaSuccess(checkoutRequestId, receiptNumber, amount ?? 0);
+      await handleMpesaSuccess(checkoutRequestId, receiptNumber, amount ?? 0);
 
-  // 🔥 EXTRA SAFETY: force correct state
-  await prisma.subscription.update({
-    where: { id: subscription.id },
-    data: {
-      status: 'ACTIVE',   // This is the critical line that clears PAST_DUE
-    },
-  });
+      // FORCE the subscription to ACTIVE — this is what hides the banner
+      await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          status: 'ACTIVE',
+          // Do NOT update lastPaymentDate if the field doesn't exist
+        },
+      });
 
-  console.log(`[mpesa-webhook] SUCCESS processed for ${checkoutRequestId}`);
-}
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // ⚠️ FAILURE (STRICTLY CONTROLLED)
-    // ─────────────────────────────────────────────────────────────────────────
+      console.log(`[mpesa-webhook] ✅ SUCCESS: Subscription ${subscription.id} set to ACTIVE`);
+    } 
     else {
-      console.log(`[mpesa-webhook] FAILURE received for ${checkoutRequestId}: ${resultDesc}`);
+      // Failure
+      console.log(`[mpesa-webhook] ❌ FAILURE for ${checkoutRequestId}: ${resultDesc}`);
 
-      // 🔥 CRITICAL PROTECTION: NEVER downgrade valid users
+      // Never downgrade an already good subscription
       if (['ACTIVE', 'TRIALING'].includes(subscription.status)) {
-        console.log(`[mpesa-webhook] Ignored failure — subscription already ${subscription.status}`);
+        console.log(`[mpesa-webhook] Ignored failure — keeping ${subscription.status}`);
         await handleMpesaFailure(checkoutRequestId, resultCode, resultDesc);
         return;
-      } else {
-        // Only downgrade if not already active/trialing
-        await handleMpesaFailure(checkoutRequestId, resultCode, resultDesc);
-        console.log(`[mpesa-webhook] Marked as PAST_DUE`);
       }
-    }
 
+      await handleMpesaFailure(checkoutRequestId, resultCode, resultDesc);
+      console.log(`[mpesa-webhook] Marked subscription as PAST_DUE`);
+    }
   } catch (err: any) {
-    error = err.message;
     console.error(`[mpesa-webhook] Error processing ${checkoutRequestId}:`, err);
   }
 
-  // ── Record event (idempotency log) ─────────────────────────────────────────
+  // Record the event for idempotency
   await prisma.webhookEvent.create({
     data: {
       externalId: checkoutRequestId,
       provider: 'mpesa',
-      eventType: resultCode === '0' ? 'stk_success' : 'stk_failed',
-      responseStatus: error ? 207 : 200,
-      error,
+      eventType: resultCode === 0 ? 'stk_success' : 'stk_failed',
+      responseStatus: 200,
     },
-  }).catch((e: any) =>
-    console.error('[mpesa-webhook] Failed to record event:', e)
-  );
+  }).catch(e => console.error('[mpesa-webhook] Failed to log event:', e));
 });
 
 // ── C2B Confirmation URL ───────────────────────────────────────────────────────
