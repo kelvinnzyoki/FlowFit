@@ -74,7 +74,7 @@ router.post('/callback', async (req: Request, res: Response) => {
 
     const subscription = mpesaTx.subscription;
 
-    if (resultCode === 0) {   // Success (ResultCode is number 0)
+    if (resultCode === '0' || resultCode === 0) {   // Success (handles both string and number)
       if (!receiptNumber) throw new Error('Missing receiptNumber on success');
 
       await handleMpesaSuccess(checkoutRequestId, receiptNumber, amount ?? 0);
@@ -90,8 +90,7 @@ router.post('/callback', async (req: Request, res: Response) => {
 
       console.log(`[mpesa-webhook] ✅ SUCCESS: Subscription ${subscription.id} set to ACTIVE`);
     } 
-    else {
-      // Failure
+    else if (resultCode !== '0' && resultCode !== 0) {   // Failure
       console.log(`[mpesa-webhook] ❌ FAILURE for ${checkoutRequestId}: ${resultDesc}`);
 
       // Never downgrade an already good subscription
