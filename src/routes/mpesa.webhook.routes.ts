@@ -64,15 +64,20 @@ router.post('/callback', async (req: Request, res: Response) => {
   let error: string | null = null;
 
   try {
-    // 🔍 ALWAYS fetch subscription first (CRITICAL FIX)
-    const subscription = await prisma.subscription.findFirst({
+    // 🔍 Find subscription via related MpesaTransaction (CRITICAL FIX)
+    const mpesaTx = await prisma.mpesaTransaction.findUnique({
       where: { checkoutRequestId },
+      include: {
+        subscription: true,
+      },
     });
 
-    if (!subscription) {
-      console.warn(`[mpesa-webhook] No subscription found for ${checkoutRequestId}`);
+    if (!mpesaTx || !mpesaTx.subscription) {
+      console.warn(`[mpesa-webhook] No subscription found for checkoutRequestId: ${checkoutRequestId}`);
       return;
     }
+
+    const subscription = mpesaTx.subscription;
 
     // ─────────────────────────────────────────────────────────────────────────
     // ✅ SUCCESS (AUTHORITATIVE + FORCE STATE)
@@ -81,14 +86,13 @@ router.post('/callback', async (req: Request, res: Response) => {
       if (!receiptNumber) throw new Error('Missing MpesaReceiptNumber on success callback');
 
       await handleMpesaSuccess(checkoutRequestId, receiptNumber, amount ?? 0);
-      
 
-      // 🔥 EXTRA SAFETY: force correct state even if service fails internally
+      // 🔥 EXTRA SAFETY: force correct state
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: {
-          status: subscription.isTrial ? 'TRIALING' : 'ACTIVE',
-          lastPaymentAt: new Date(),
+          status: 'ACTIVE',                    // Force ACTIVE (remove isTrial logic)
+          lastPaymentDate: new Date(),         // Use correct field name from your schema
         },
       });
 
@@ -103,17 +107,11 @@ router.post('/callback', async (req: Request, res: Response) => {
 
       // 🔥 CRITICAL PROTECTION: NEVER downgrade valid users
       if (['ACTIVE', 'TRIALING'].includes(subscription.status)) {
-        console.log(
-          `[mpesa-webhook] Ignored failure — subscription already ${subscription.status}`
-        );
-
-        // Optional: still log failure via service WITHOUT state change
+        console.log(`[mpesa-webhook] Ignored failure — subscription already ${subscription.status}`);
         await handleMpesaFailure(checkoutRequestId, resultCode, resultDesc);
-        
-        if (['ACTIVE', 'TRIALING'].includes(subscription.status)) return;
-      
+        return;
       } else {
-        // ✅ Only now allow downgrade
+        // Only downgrade if not already active/trialing
         await handleMpesaFailure(checkoutRequestId, resultCode, resultDesc);
         console.log(`[mpesa-webhook] Marked as PAST_DUE`);
       }
