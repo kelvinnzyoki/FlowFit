@@ -123,9 +123,9 @@ export async function initiateStkPush(
   }
 
   return {
-    merchantRequestId: data.MerchantRequestID,
-    checkoutRequestId: data.CheckoutRequestID,
-    customerMessage:   data.CustomerMessage,
+    merchantRequestId: data.merchantRequestId,
+    checkoutRequestId: data.checkoutRequestId,
+    customerMessage:   data.customerMessage,
   };
 }
 
@@ -167,7 +167,7 @@ export async function queryStkStatus(checkoutRequestId: string): Promise<StkQuer
   return {
     resultCode:        String(data.ResultCode ?? data.errorCode ?? '17'),
     resultDesc:        data.ResultDesc ?? data.errorMessage ?? 'Unknown',
-    checkoutRequestId: data.CheckoutRequestID ?? checkoutRequestId,
+    checkoutRequestId: data.CheckoutRequestId ?? checkoutRequestId,
   };
 }
 
@@ -196,8 +196,8 @@ export function parseStkCallback(raw: any): MpesaCallbackBody {
   const get = (name: string) => items.find((i: any) => i.Name === name)?.Value ?? null;
 
   return {
-    merchantRequestId: String(cb.MerchantRequestID),
-    checkoutRequestId: String(cb.CheckoutRequestID),
+    merchantRequestId: String(cb.merchantRequestId),
+    checkoutRequestId: String(cb.checkoutRequestId),
     resultCode:        String(cb.ResultCode),
     resultDesc:        String(cb.ResultDesc),
     receiptNumber:     get('MpesaReceiptNumber') ? String(get('MpesaReceiptNumber')) : null,
