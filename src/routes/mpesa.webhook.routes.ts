@@ -31,7 +31,8 @@ router.post('/validation', (req: Request, res: Response) => {
   return res.json({ ResultCode: '0', ResultDesc: 'Accepted' });
 });
 
- // ── STK Push Callback ──────────────────────────────────────────────────────────
+ 
+      // ── STK Push Callback ──────────────────────────────────────────────────────────
 router.post('/callback', async (req: Request, res: Response) => {
   // Always ACK immediately to Safaricom
   res.json({ ResultCode: '0', ResultDesc: 'Accepted' });
@@ -51,7 +52,7 @@ router.post('/callback', async (req: Request, res: Response) => {
 
   const { checkoutRequestId, resultCode, resultDesc, receiptNumber, amount } = parsed;
 
-  // Idempotency
+  // Idempotency check
   const existing = await prisma.webhookEvent.findUnique({
     where: { externalId: checkoutRequestId },
   });
@@ -61,7 +62,7 @@ router.post('/callback', async (req: Request, res: Response) => {
   }
 
   try {
-    // Find the M-Pesa transaction and its linked subscription
+    // Find M-Pesa transaction + linked subscription
     const mpesaTx = await prisma.mpesaTransaction.findUnique({
       where: { checkoutRequestId },
       include: { subscription: true },
@@ -74,40 +75,43 @@ router.post('/callback', async (req: Request, res: Response) => {
 
     const subscription = mpesaTx.subscription;
 
-    if (resultCode === '0' || resultCode === 0) {   // Success (handles both string and number)
+    // SUCCESS - handle both string '0' and number 0 safely
+    const isSuccess = resultCode === '0' || resultCode === 0;
+
+    if (isSuccess) {
       if (!receiptNumber) throw new Error('Missing receiptNumber on success');
 
       await handleMpesaSuccess(checkoutRequestId, receiptNumber, amount ?? 0);
 
-      // FORCE the subscription to ACTIVE — this is what hides the banner
+      // FORCE ACTIVE — this is what hides the "PAYMENT FAILED" banner
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: {
           status: 'ACTIVE',
-          // Do NOT update lastPaymentDate if the field doesn't exist
         },
       });
 
       console.log(`[mpesa-webhook] ✅ SUCCESS: Subscription ${subscription.id} set to ACTIVE`);
     } 
-    else if (resultCode !== '0' && resultCode !== 0) {   // Failure
+    // FAILURE
+    else {
       console.log(`[mpesa-webhook] ❌ FAILURE for ${checkoutRequestId}: ${resultDesc}`);
 
-      // Never downgrade an already good subscription
+      // Never downgrade already good subscriptions
       if (['ACTIVE', 'TRIALING'].includes(subscription.status)) {
         console.log(`[mpesa-webhook] Ignored failure — keeping ${subscription.status}`);
-        await handleMpesaFailure(checkoutRequestId, resultCode, resultDesc);
+        await handleMpesaFailure(checkoutRequestId, String(resultCode), resultDesc);
         return;
       }
 
-      await handleMpesaFailure(checkoutRequestId, resultCode, resultDesc);
-      console.log(`[mpesa-webhook] Marked subscription as PAST_DUE`);
+      await handleMpesaFailure(checkoutRequestId, String(resultCode), resultDesc);
+      console.log(`[mpesa-webhook] Marked as PAST_DUE`);
     }
   } catch (err: any) {
     console.error(`[mpesa-webhook] Error processing ${checkoutRequestId}:`, err);
   }
 
-  // Record the event for idempotency
+  // Record event for idempotency
   await prisma.webhookEvent.create({
     data: {
       externalId: checkoutRequestId,
