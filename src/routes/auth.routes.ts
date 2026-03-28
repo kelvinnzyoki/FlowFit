@@ -218,8 +218,13 @@ router.post('/send-otp', authLimiter, async (req: Request, res: Response) => {
 
     // TODO: replace the line below with your email provider (e.g. Resend, SendGrid):
     //   await sendEmail({ to: email, subject: 'Your FlowFit code', body: `Code: ${otp}` });
-    // Until then the code is returned in the response so the frontend can display it.
-    console.log(`[OTP] ${purpose} code for ${email}: ${otp}`);  // server log only
+    await resend.emails.send({
+            from: "flowfitworkouts@cctamcc.site",
+            to: email,
+            subject: "Your FlowFit Code",
+            html: `Your FlowFit verification code is: <strong>${otp}</strong>`
+        });
+  
 
     res.json({
       success: true,
