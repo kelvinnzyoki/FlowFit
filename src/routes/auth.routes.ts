@@ -301,12 +301,18 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
     const otp = await issueOtp(normalised, 'password_reset');
 
     // TODO: wire in email provider here
-    console.log(`[OTP] password_reset code for ${normalised}: ${otp}`);
+    await resend.emails.send({
+            from: "flowfitworkouts@cctamcc.site",
+            to: email,
+            subject: "Password Reset Code",
+            html: `OTP password reset code for ${normalised}: ${otp}`
+        });
+    
 
     res.json({
       success: true,
       message: `A ${OTP_TTL_MINUTES}-minute reset code has been sent to ${email}.`,
-      otp,  // remove once email is wired
+    
     });
   } catch (error) {
     console.error('Forgot password error:', error);
