@@ -229,8 +229,7 @@ router.post('/send-otp', authLimiter, async (req: Request, res: Response) => {
     res.json({
       success: true,
       message: `A ${OTP_TTL_MINUTES}-minute verification code has been sent to ${email}.`,
-      // Remove the line below once you wire in an email provider:
-      otp,
+      
     });
   } catch (error) {
     console.error('Send OTP error:', error);
