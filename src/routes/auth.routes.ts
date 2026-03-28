@@ -299,11 +299,12 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
     }
 
     const otp = await issueOtp(normalised, 'password_reset');
+    const resend = new Resend(process.env.RESEND_API_KEY);
 
     // TODO: wire in email provider here
     await resend.emails.send({
             from: "flowfitworkouts@cctamcc.site",
-            to: email,
+            to: normalised,
             subject: "Password Reset Code",
             html: `OTP password reset code for ${normalised}: ${otp}`
         });
