@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { Resend } from "resend";
 import prisma from '../config/db.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
 import { authenticate } from '../middleware/auth.middleware.js';
@@ -215,6 +216,7 @@ router.post('/send-otp', authLimiter, async (req: Request, res: Response) => {
     }
 
     const otp = await issueOtp(email.toLowerCase().trim(), purpose);
+    const resend = new Resend(process.env.RESEND_API_KEY);
 
     // TODO: replace the line below with your email provider (e.g. Resend, SendGrid):
     //   await sendEmail({ to: email, subject: 'Your FlowFit code', body: `Code: ${otp}` });
