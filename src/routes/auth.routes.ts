@@ -17,20 +17,7 @@ const REFRESH_EXPIRES    = '7d';
 const OTP_TTL_MINUTES    = 10;   // OTP expires after 10 minutes
 const OTP_LENGTH         = 6;    // 6-digit code
 
-const token = jwt.sign(
-  { userId: user.id },
-  process.env.JWT_ACCESS_SECRET,
-  { expiresIn: "1d" }
-);
 
-res.cookie("accessToken", token, {
-  httpOnly: true,          // prevents JS access (security)
-  secure: true,            // MUST be true in production (HTTPS)
-  sameSite: "none",        // REQUIRED for cross-domain (your case)
-  maxAge: 1000 * 60 * 60 * 24, // 1 day
-});
-
-res.json({ success: true });
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
 
