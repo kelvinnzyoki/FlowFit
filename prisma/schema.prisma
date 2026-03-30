@@ -104,6 +104,7 @@ model User {
   subscriptions    Subscription[]
   refreshTokens    RefreshToken[]
   mpesaTransactions MpesaTransaction[]
+  aiGenerationLogs AiGenerationLog[]
 
   @@map("users")
 }
@@ -610,9 +611,13 @@ model DailyStats {
 model AiGenerationLog {
   id        String   @id @default(cuid())
   userId    String
-  type      String
+  type      String   // e.g. "workout_plan"
   prompt    String?
   response  String?
   createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ai_generation_logs")
+  @@index([userId])
 }
