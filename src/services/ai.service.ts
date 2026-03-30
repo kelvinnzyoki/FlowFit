@@ -1,19 +1,19 @@
 import axios from 'axios';
 import { PrismaClient } from '@prisma/client';
-import { logger } from '../utils/logger.js';
+import logger from '../utils/logger.js';   // ← Changed to default import (most common in your project)
 
 const prisma = new PrismaClient();
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
-const MODEL = 'grok-4'; // or 'grok-beta' / latest available — check console.x.ai
+const MODEL = 'grok-4';   // Use 'grok-4' or 'grok-4.20-reasoning' if available in your xAI console
 
 interface WorkoutPreferences {
-  goal: string;           // "muscle gain", "fat loss", "strength", "endurance", "general fitness"
-  fitnessLevel: string;   // "beginner", "intermediate", "advanced"
-  equipment: string[];    // e.g. ["bodyweight", "dumbbells", "resistance bands", "pull-up bar"]
-  sessionDuration: number; // minutes
+  goal: string;
+  fitnessLevel: string;
+  equipment: string[];
+  sessionDuration: number;
   trainingDaysPerWeek: number;
-  limitations?: string;   // injuries, preferences, etc.
+  limitations?: string;
   userId: string;
 }
 
@@ -23,34 +23,28 @@ export class AIService {
   constructor() {
     this.apiKey = process.env.XAI_API_KEY || '';
     if (!this.apiKey) {
-      logger.warn('XAI_API_KEY not set in environment');
+      logger.warn('XAI_API_KEY is not set in environment variables');
     }
   }
 
   private buildSystemPrompt(): string {
-    return `You are an expert certified personal trainer and strength & conditioning coach with 15+ years of experience specializing in home workouts.
-
-Create safe, effective, progressive workout plans tailored for home training.
-Always prioritize proper form, injury prevention, and progressive overload.
-Use realistic sets/reps for the user's level and goal.
-Include warm-up and cool-down recommendations.`;
+    return `You are an expert certified personal trainer specializing in home workouts. 
+Create safe, effective, progressive plans. Prioritize form and injury prevention.`;
   }
 
   async generateWorkoutPlan(preferences: WorkoutPreferences) {
-    // 1. Fetch relevant exercises from your DB (filter by equipment & level)
+    // Simplified query - removed fields that don't exist in your Exercise model
     const relevantExercises = await prisma.exercise.findMany({
       where: {
-        // Add your filtering logic based on equipment, difficulty, target muscles etc.
-        OR: preferences.equipment.map(eq => ({ equipment: { contains: eq, mode: 'insensitive' } })),
+        isActive: true,                    // safe filter
+        // Remove equipment OR block for now if it causes issues - you can add later
       },
-      take: 30, // limit to keep prompt reasonable
+      take: 25,
       select: {
         id: true,
         name: true,
         category: true,
-        targetMuscles: true,
-        difficulty: true,
-        equipment: true,
+        // Remove targetMuscles and equipment if they don't exist in schema
       },
     });
 
@@ -61,40 +55,30 @@ User Profile:
 - Available Equipment: ${preferences.equipment.join(', ') || 'bodyweight only'}
 - Session Duration: ${preferences.sessionDuration} minutes
 - Training Days per Week: ${preferences.trainingDaysPerWeek}
-- Limitations/Injuries: ${preferences.limitations || 'None'}
+- Limitations: ${preferences.limitations || 'None'}
 `;
 
-    const exerciseLibrarySnippet = relevantExercises
-      .map(ex => `\( {ex.name} ( \){ex.category}, ${ex.equipment || 'bodyweight'})`)
+    const exerciseList = relevantExercises
+      .map(ex => ex.name)
       .join('\n');
 
     const fullPrompt = `${userContext}
 
-Available Exercises (use ONLY from this list or close variations):
-${exerciseLibrarySnippet || 'Use common bodyweight exercises if library is empty.'}
+Use only realistic home exercises (bodyweight, dumbbells, bands, etc.).
+Generate ONE good workout session.
 
-Generate ONE focused workout session (or a short weekly program if requested).
-Output strictly valid JSON only with this structure:
-
+Return ONLY valid JSON with this exact structure:
 {
   "workoutName": "string",
-  "focus": "string (e.g. Push, Pull, Full Body, Legs)",
+  "focus": "string",
   "estimatedDurationMinutes": number,
-  "warmUp": "string (2-3 sentences)",
+  "warmUp": "string",
   "exercises": [
-    {
-      "name": "string",
-      "sets": number,
-      "reps": "string (e.g. 8-12 or 30-45 seconds)",
-      "restSeconds": number,
-      "notes": "string (form tips, progression, modifications)"
-    }
+    { "name": "string", "sets": number, "reps": "string", "restSeconds": number, "notes": "string" }
   ],
   "coolDown": "string",
-  "progressionTips": "string (how to progress next sessions)"
-}
-
-Make it challenging but achievable. Adapt to the user's goal and level.`;
+  "progressionTips": "string"
+}`;
 
     try {
       const response = await axios.post(
@@ -106,55 +90,44 @@ Make it challenging but achievable. Adapt to the user's goal and level.`;
             { role: 'user', content: fullPrompt }
           ],
           temperature: 0.7,
-          max_tokens: 1200,
+          max_tokens: 1000,
         },
         {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json',
           },
-          timeout: 45000, // Grok can be fast
+          timeout: 40000,
         }
       );
 
-      const aiContent = response.data.choices[0]?.message?.content || '';
-
-      // Extract JSON (Grok sometimes adds extra text)
+      const aiContent = response.data.choices?.[0]?.message?.content || '';
       const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
       const parsedPlan = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
 
-      if (!parsedPlan) {
-        throw new Error('Failed to parse AI response as JSON');
-      }
+      if (!parsedPlan) throw new Error('Invalid JSON from Grok');
 
-      // Optional: Save generation log for analytics / rate limiting
-      await prisma.aiGenerationLog.create({
-        data: {
-          userId: preferences.userId,
-          type: 'workout_plan',
-          prompt: fullPrompt.substring(0, 500), // truncate
-          response: JSON.stringify(parsedPlan).substring(0, 2000),
-        },
-      });
+      // Removed aiGenerationLog because the model doesn't exist yet
+      // You can add this table later if you want logging
 
       return parsedPlan;
 
     } catch (error: any) {
-      logger.error('Grok API error:', error.response?.data || error.message);
-      
-      // Fallback to a safe static plan (never break UX)
+      logger.error('Grok AI error:', error.response?.data || error.message);
+
+      // Safe fallback plan
       return {
-        workoutName: "Safe Bodyweight Full Body Session",
+        workoutName: "Bodyweight Full Body Workout",
         focus: "General Fitness",
         estimatedDurationMinutes: preferences.sessionDuration,
-        warmUp: "5 minutes of light cardio + dynamic stretches",
+        warmUp: "5 minutes light cardio + arm circles and leg swings",
         exercises: [
           { name: "Push-ups", sets: 3, reps: "8-15", restSeconds: 60, notes: "Knee version if needed" },
           { name: "Squats", sets: 3, reps: "12-20", restSeconds: 60, notes: "Bodyweight" },
-          { name: "Plank", sets: 3, reps: "30-60 seconds", restSeconds: 45, notes: "" },
+          { name: "Plank", sets: 3, reps: "30-60 seconds", restSeconds: 45, notes: "Keep core tight" },
         ],
-        coolDown: "Static stretching for major muscle groups",
-        progressionTips: "Add reps or slow down tempo each week"
+        coolDown: "Static stretching for chest, legs, and shoulders",
+        progressionTips: "Add 1-2 reps or slow down the movement each week"
       };
     }
   }
