@@ -1,5 +1,6 @@
+
 -- Add AiGenerationLog table for AI usage tracking
-CREATE TABLE "ai_generation_logs" (
+CREATE TABLE IF NOT EXISTS "ai_generation_logs" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "userId" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -14,4 +15,4 @@ ADD CONSTRAINT "AiGenerationLog_userId_fkey"
 FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- Add index for better performance
-CREATE INDEX "AiGenerationLog_userId_idx" ON "AiGenerationLog"("userId");
+CREATE INDEX IF NOT EXISTS "AiGenerationLog_userId_idx" ON "AiGenerationLog"("userId");
