@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { aiService } from '../services/ai.service.js';
 import { requireAuth } from '../middleware/auth.middleware.js';
 // Optional: requirePlan middleware for Pro+
