@@ -608,7 +608,7 @@ model DailyStats {
   @@map("daily_stats")
 }
 
-// model AiGenerationLog {
+/* model AiGenerationLog {
   id        String   @id @default(cuid())
   userId    String
   type      String   // e.g. "workout_plan"
@@ -620,4 +620,4 @@ model DailyStats {
 
   @@map("ai_generation_logs")
   @@index([userId])
-} //
+} */
