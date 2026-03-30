@@ -47,6 +47,7 @@ import userRoutes         from './user.routes.js';
 import subscriptionRoutes from './subscription.routes.js';
 import seedRouter from './seed.routes.js';
 import exerciseRoutes from './exercise.routes.js';
+import aiRoutes from './ai.routes.js';
    
 
 
@@ -74,6 +75,7 @@ router.use('/progress',      progressRoutes);
 router.use('/users',         userRoutes);
 router.use('/subscriptions', subscriptionRoutes);
 router.use('/exercises', exerciseRoutes);
+router.use('/ai', aiRoutes);
 
 router.use('/admin', seedRouter);
 
