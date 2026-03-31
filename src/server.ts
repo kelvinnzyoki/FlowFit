@@ -19,7 +19,9 @@ import redis from './config/redis.js';
 import subscriptionRoutes from './routes/subscription.routes.js';
 import webhookRoutes from './routes/webhook.routes.js';
 import exerciseRoutes from "./routes/exercise.routes.js";
-import cookieParser from 'cookie-parser';   
+import cookieParser from 'cookie-parser';
+import aiRoutes from './routes/ai.routes.js';
+
 
 
 
@@ -133,6 +135,8 @@ app.get('/', (req: Request, res: Response) => {
 // ============================================
 
 app.use('/api/v1', routes);
+
+app.use('/api/v1/ai', aiRoutes);
 
 // ============================================
 // ERROR HANDLING
