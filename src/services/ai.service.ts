@@ -81,25 +81,25 @@ Return ONLY valid JSON with this exact structure:
 }`;
 
     try {
-      const response = await axios.post(
-        GROK_API_URL,
-        {
-          model: MODEL,
-          messages: [
-            { role: 'system', content: this.buildSystemPrompt() },
-            { role: 'user', content: fullPrompt }
-          ],
-          temperature: 0.7,
-          max_tokens: 1000,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 40000,
-        }
-      );
+  const response = await axios.post(
+    'https://api.x.ai/v1/chat/completions',   // Confirmed correct endpoint
+    {
+      model: 'grok-4',                        // or 'grok-4.20-non-reasoning' if you have access
+      messages: [
+        { role: 'system', content: 'You are an expert home workout trainer. Be concise and practical.' },
+        { role: 'user', content: fullPrompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 1200,
+    },
+    {
+      headers: {
+        'Authorization': `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 30000,   // 30 seconds max
+    }
+  );
 
       const aiContent = response.data.choices?.[0]?.message?.content || '';
       const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
@@ -113,7 +113,11 @@ Return ONLY valid JSON with this exact structure:
       return parsedPlan;
 
     } catch (error: any) {
-      logger.error('Grok AI error:', error.response?.data || error.message);
+  logger.error('Grok API call failed:', {
+    message: error.message,
+    status: error.response?.status,
+    data: error.response?.data
+  });
 
       // Safe fallback plan
       return {
