@@ -214,7 +214,8 @@ async function processEvent(event: Stripe.Event): Promise<void> {
     status: newStatus,
     currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
     
-  }
+  },
+    });
 
 
       // OVERRIDE: if subscription is paid and valid
