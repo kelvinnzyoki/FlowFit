@@ -55,7 +55,7 @@ export class WorkoutGeneratorService {
 /** Progressive Overload Suggestion */
   async suggestProgression(
     userId: string, 
-    exerciseName: string, 
+    exerciseId: string, 
     lastSets: number, 
     lastReps: string, 
     lastRPE?: number
