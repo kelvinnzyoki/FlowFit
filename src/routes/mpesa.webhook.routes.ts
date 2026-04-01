@@ -13,13 +13,23 @@ const SAFARICOM_IPS = new Set([
   '196.201.212.136', '196.201.212.74',  '196.201.212.69',
 ]);
 
-function validateSafaricomIp(req: Request): boolean {
+// Replace the existing validateSafaricomIp function
+function validateSafaricomAuth(req: Request): boolean {
+  // 1. Check if we are in development
   if (process.env.MPESA_ENVIRONMENT !== 'production') return true;
-  if (process.env.MPESA_VALIDATE_IP !== 'true') return true;
 
-  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
-          ?? req.socket?.remoteAddress ?? '';
-  return SAFARICOM_IPS.has(ip);
+  // 2. Verify a secret token passed in the query string of the CallBackURL
+  // You must update your Daraja Portal CallBackURL to: 
+  // https://your-api.com/api/v1/webhooks/mpesa?secret=SOME_LONG_RANDOM_KEY
+  const webhookSecret = process.env.MPESA_WEBHOOK_SECRET;
+  const providedSecret = req.query.secret;
+
+  if (!webhookSecret || providedSecret !== webhookSecret) {
+    console.error('[mpesa-webhook] Unauthorized access attempt: Invalid Secret');
+    return false;
+  }
+
+  return true;
 }
 
 // ── Validation URL ─────────────────────────────────────────────────────────────
