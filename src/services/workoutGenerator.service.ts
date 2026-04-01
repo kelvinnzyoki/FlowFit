@@ -13,9 +13,9 @@ interface WorkoutPreferences {
   userId: string;
 }
 
-// Simple cache
+// Simple cache for variety
 const generationCache = new Map<string, { plan: any; timestamp: number }>();
-const CACHE_TTL = 24 * 60 * 60 * 1000;
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
 export class WorkoutGeneratorService {
 
@@ -28,14 +28,9 @@ export class WorkoutGeneratorService {
     }
 
     try {
-      // Fixed: Removed 'equipment' from select since it doesn't exist in your schema
       const allExercises = await prisma.exercise.findMany({
         where: { isActive: true },
-        select: { 
-          name: true, 
-          category: true 
-          // equipment field removed because it doesn't exist in your Exercise model
-        }
+        select: { name: true, category: true }
       });
 
       const split = this.determineSplit(preferences);
@@ -52,22 +47,19 @@ export class WorkoutGeneratorService {
       return this.getFallbackPlan(preferences);
     }
   }
-/** Progressive Overload Suggestion */
+
   async suggestProgression(
-    userId: string, 
-    exerciseId: string, 
-    lastSets: number, 
-    lastReps: string, 
+    userId: string,
+    exerciseId: string,
+    lastSets: number,
+    lastReps: string,
     lastRPE?: number
   ) {
     try {
-      // FIXED: Use correct field name from your Prisma schema
-      // Change 'exerciseName' to 'exercise' if that's what your model uses
       const recentLogs = await prisma.workoutLog.findMany({
         where: { 
           userId, 
-          exerciseId: exerciseId        // ← Most likely correct field (change if needed)
-          // exerciseName: exerciseName // ← Try this only if the above fails
+          exerciseId: exerciseId   // Change to 'exerciseName' if your model uses that
         },
         orderBy: { createdAt: 'desc' },
         take: 4,
@@ -80,14 +72,13 @@ export class WorkoutGeneratorService {
         };
       }
 
-      // FIXED: Safe parsing to avoid number/string error
       const avgReps = recentLogs.reduce((sum, log) => {
         const repsStr = String(log.reps || "0");
         const repsNum = parseInt(repsStr, 10);
         return sum + (isNaN(repsNum) ? 0 : repsNum);
       }, 0) / recentLogs.length;
 
-      const lastRepsNum = parseInt(String(lastReps), 10) || 0;
+      const lastRepsNum = parseInt(String(lastReps), 10) || 8;
 
       if (avgReps >= 12 && lastSets >= 3) {
         return {
@@ -110,51 +101,40 @@ export class WorkoutGeneratorService {
       };
     } catch (error) {
       logger.error('suggestProgression error:', error);
-      return { 
-        suggestion: "Keep up the great work!", 
-        type: "maintenance" 
-      };
+      return { suggestion: "Keep up the great work!", type: "maintenance" };
     }
   }
 
   private determineSplit(p: WorkoutPreferences): string {
-    const { trainingDaysPerWeek, fitnessLevel, goal } = p;
-
+    const { trainingDaysPerWeek, fitnessLevel } = p;
     if (trainingDaysPerWeek >= 5 && fitnessLevel === 'advanced') return 'ppl';
     if (trainingDaysPerWeek >= 4) return 'upperlower';
-    if (goal === 'strength' || goal === 'muscle gain') return 'pushpull';
+    if (p.goal === 'strength' || p.goal === 'muscle gain') return 'pushpull';
     return 'fullbody';
   }
 
   private buildPlan(exercises: any[], p: WorkoutPreferences, split: string) {
     const rule = this.getRepRule(p.goal, p.fitnessLevel);
-
-    // Better shuffling with seed based on inputs for controlled variety
-    let pool = this.smartShuffle(exercises, p);
+    let pool = [...exercises].sort(() => Math.random() - 0.5);
 
     const selected: any[] = [];
-    const usedCategories = new Set<string>();
 
     if (split === 'fullbody') {
-      // Prioritize variety: Push → Pull → Legs → Core
-      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
-      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p)); // Second strength (often push/pull)
-      selected.push(this.pickBestExercise(pool, ['CORE'], usedCategories, p));
-      selected.push(this.pickBestExercise(pool, ['CARDIO', 'HIIT'], usedCategories, p));
-    } 
-    else if (split === 'upperlower') {
-      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
-      selected.push(this.pickBestExercise(pool, ['STRENGTH', 'CORE'], usedCategories, p));
-    } 
-    else if (split === 'pushpull') {
-      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
-      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
-      selected.push(this.pickBestExercise(pool, ['CORE'], usedCategories, p));
-    } 
-    else if (split === 'ppl') {
-      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
-      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
-      selected.push(this.pickBestExercise(pool, ['STRENGTH', 'CORE'], usedCategories, p));
+      selected.push(this.pickByCategory(pool, ['STRENGTH']));
+      selected.push(this.pickByCategory(pool, ['STRENGTH']));
+      selected.push(this.pickByCategory(pool, ['CORE']));
+      selected.push(this.pickByCategory(pool, ['CARDIO', 'HIIT']));
+    } else if (split === 'upperlower') {
+      selected.push(this.pickByCategory(pool, ['STRENGTH']));
+      selected.push(this.pickByCategory(pool, ['STRENGTH', 'CORE']));
+    } else if (split === 'pushpull') {
+      selected.push(this.pickByCategory(pool, ['STRENGTH']));
+      selected.push(this.pickByCategory(pool, ['STRENGTH']));
+      selected.push(this.pickByCategory(pool, ['CORE']));
+    } else {
+      selected.push(this.pickByCategory(pool, ['STRENGTH']));
+      selected.push(this.pickByCategory(pool, ['STRENGTH']));
+      selected.push(this.pickByCategory(pool, ['CORE']));
     }
 
     return {
@@ -167,64 +147,16 @@ export class WorkoutGeneratorService {
         sets: rule.sets,
         reps: rule.reps,
         restSeconds: rule.rest,
-        notes: this.getExerciseNotes(ex, p)
+        notes: p.limitations?.toLowerCase().includes('wrist') ? 'Modify for wrist comfort' : 'Bodyweight'
       })),
-      coolDown: "Static stretching: Child's Pose, Downward Dog, Hip Flexor Stretch",
-      progressionTips: this.getProgressionTips(p),
+      coolDown: "Static stretching: Child's Pose, Downward Dog",
+      progressionTips: p.fitnessLevel === 'beginner' 
+        ? "Focus on form first." 
+        : "Increase reps or weight when it feels easy.",
       splitType: split
     };
   }
 
-  // Improved smart shuffle based on user inputs
-  private smartShuffle(exercises: any[], p: WorkoutPreferences): any[] {
-    let shuffled = [...exercises];
-
-    // Bias toward user's goal
-    if (p.goal === 'muscle gain' || p.goal === 'strength') {
-      shuffled.sort((a, b) => {
-        const aStrength = a.category === 'STRENGTH' ? 3 : 1;
-        const bStrength = b.category === 'STRENGTH' ? 3 : 1;
-        return bStrength - aStrength;
-      });
-    } else if (p.goal === 'fat loss') {
-      shuffled.sort((a, b) => {
-        const aCardio = ['CARDIO', 'HIIT'].includes(a.category) ? 3 : 1;
-        const bCardio = ['CARDIO', 'HIIT'].includes(b.category) ? 3 : 1;
-        return bCardio - aCardio;
-      });
-    }
-
-    // Final random shuffle for variety
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-
-    return shuffled;
-  }
-
-  private pickBestExercise(pool: any[], preferredCategories: string[], used: Set<string>, p: WorkoutPreferences) {
-    // First try preferred categories
-    let candidates = pool.filter(ex => 
-      preferredCategories.some(cat => ex.category === cat) && !used.has(ex.name)
-    );
-
-    // Fallback to any available
-    if (candidates.length === 0) {
-      candidates = pool.filter(ex => !used.has(ex.name));
-    }
-
-    if (candidates.length === 0) return null;
-
-    // Pick one and mark as used
-    const chosen = candidates[0];
-    used.add(chosen.name);
-    pool.splice(pool.indexOf(chosen), 1);
-
-    return chosen;
-  }
-
-  // Keep your existing methods below (getRepRule, generateWorkoutName, getSplitName, etc.)
   private getRepRule(goal: string, level: string) {
     const rules: any = {
       'muscle gain': { sets: level === 'advanced' ? 4 : 3, reps: '8-12', rest: 75 },
@@ -236,6 +168,14 @@ export class WorkoutGeneratorService {
     return rules[goal] || rules['general fitness'];
   }
 
+  private pickByCategory(pool: any[], categories: string[]) {
+    const filtered = pool.filter((ex: any) => categories.includes(ex.category));
+    if (filtered.length === 0) return null;
+    const chosen = filtered[0];
+    pool.splice(pool.indexOf(chosen), 1);
+    return chosen;
+  }
+
   private generateWorkoutName(p: WorkoutPreferences) {
     const map: any = {
       'muscle gain': 'Hypertrophy Flow',
@@ -257,19 +197,6 @@ export class WorkoutGeneratorService {
     return map[split] || 'Custom Split';
   }
 
-  private getExerciseNotes(ex: any, p: WorkoutPreferences) {
-    if (p.limitations?.toLowerCase().includes('wrist')) {
-      return 'Modify for wrist comfort (e.g. knee push-ups)';
-    }
-    return 'Bodyweight';
-  }
-
-  private getProgressionTips(p: WorkoutPreferences) {
-    return p.fitnessLevel === 'beginner'
-      ? "Master form first. Add 1-2 reps when it feels easy."
-      : "When you hit the upper rep range comfortably, increase weight or reps.";
-  }
-
   private getFallbackPlan(p: WorkoutPreferences) {
     return {
       workoutName: "Safe Bodyweight Flow",
@@ -281,74 +208,8 @@ export class WorkoutGeneratorService {
         { name: "Squats", sets: 3, reps: "12-15", restSeconds: 60, notes: "" },
         { name: "Plank", sets: 3, reps: "30-60 seconds", restSeconds: 45, notes: "Core tight" },
       ],
-      coolDown: "Static stretching: Child's Pose, Downward Dog",
+      coolDown: "Static stretching",
       progressionTips: "Add reps when it feels easy."
-    };
-  }
-        }
-
-  
-
-  private getRepRule(goal: string, level: string) {
-    const rules = {
-      'muscle gain': { sets: level === 'advanced' ? 4 : 3, reps: '8-12', rest: 75 },
-      'fat loss':    { sets: 3, reps: '12-20', rest: 45 },
-      'strength':    { sets: level === 'advanced' ? 5 : 4, reps: '5-8', rest: 120 },
-      'endurance':   { sets: 3, reps: '15-25', rest: 40 },
-      'general fitness': { sets: 3, reps: '10-15', rest: 60 }
-    };
-    return rules[goal as keyof typeof rules] || rules['general fitness'];
-  }
-
-  
-
-  private generateWorkoutName(p: WorkoutPreferences) {
-    const map: Record<string, string> = {
-      'muscle gain': 'Hypertrophy Flow',
-      'fat loss': 'Metabolic Burn',
-      'strength': 'Strength Builder',
-      'endurance': 'Endurance Builder',
-      'general fitness': 'Total Body Flow'
-    };
-    return map[p.goal] || 'Custom FlowFit Session';
-  }
-
-  private getSplitName(split: string) {
-    const map: Record<string, string> = {
-      fullbody: 'Full Body',
-      upperlower: 'Upper / Lower',
-      pushpull: 'Push / Pull',
-      ppl: 'Push / Pull / Legs'
-    };
-    return map[split] || 'Custom Split';
-  }
-
-  private getExerciseNotes(ex: any, p: WorkoutPreferences) {
-    if (p.limitations?.toLowerCase().includes('wrist')) {
-      return 'Modify for wrist comfort (e.g. knee push-ups)';
-    }
-    return 'Bodyweight';
-  }
-
-  private getProgressionTips(p: WorkoutPreferences) {
-    return p.fitnessLevel === 'beginner'
-      ? "Master form first. Add 1-2 reps when it feels easy."
-      : "When you hit the upper rep range comfortably, increase weight or reps.";
-  }
-
-  private getFallbackPlan(p: WorkoutPreferences) {
-    return {
-      workoutName: "Safe Bodyweight Flow",
-      focus: "Full Body",
-      estimatedDurationMinutes: p.sessionDuration,
-      warmUp: "5 min light cardio + dynamic stretches",
-      exercises: [
-        { name: "Push-ups", sets: 3, reps: "8-12", restSeconds: 60, notes: "Knee version if needed" },
-        { name: "Squats", sets: 3, reps: "12-15", restSeconds: 60, notes: "" },
-        { name: "Plank", sets: 3, reps: "30-60 seconds", restSeconds: 45, notes: "Core tight" },
-      ],
-      coolDown: "Static stretching: Child's Pose, Downward Dog",
-      progressionTips: "Add reps or slow tempo weekly"
     };
   }
 }
