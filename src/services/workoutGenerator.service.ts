@@ -677,7 +677,7 @@ export class WorkoutGeneratorService {
     cooldowns.push('3-5 min slow walk or light movement');
 
     // Static stretching
-    cooldowns.push('Child\'s Pose (60s)');
+    cooldowns.push('Child's Pose (60s)');
     cooldowns.push('Downward Dog (45s)');
     cooldowns.push('Pigeon Pose (45s each side)');
     cooldowns.push('Seated Forward Fold (60s)');
@@ -689,7 +689,7 @@ export class WorkoutGeneratorService {
     }
 
     // Breathing
-    cooldowns.push('Deep breathing: 5 deep breaths, 4s inhale → 6s exhale');
+    cooldowns.push('Deep breathing: 5 deep breaths, 4s inhale to 6s exhale');
 
     return cooldowns.join(' • ');
   }
