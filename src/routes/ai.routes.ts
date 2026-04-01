@@ -1,47 +1,68 @@
-import { Router, Response } from 'express';
-import { aiService } from '../services/ai.service.js';
-import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
+import { Router, Request, Response } from 'express';
+import { workoutGenerator } from '../services/workoutGenerator.service.js';
+import { requireAuth } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
-// ─── POST /api/v1/ai/generate-workout ────────────────────────────────────────
-router.post('/generate-workout', authenticate, async (req: AuthRequest, res: Response) => {
+// Main endpoint called by the AI Modal
+router.post('/generate-workout', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user?.id) {
-      res.status(401).json({ success: false, message: 'Authentication required' });
-      return;
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Authentication required' 
+      });
     }
 
-    const { goal, fitnessLevel, equipment, sessionDuration, trainingDaysPerWeek, limitations } = req.body;
-
-    if (!goal || !fitnessLevel) {
-      res.status(400).json({ success: false, message: 'goal and fitnessLevel are required.' });
-      return;
-    }
-
-    const plan = await aiService.generateWorkoutPlan({
-      goal,
-      fitnessLevel,
-      equipment:           Array.isArray(equipment) ? equipment : [],
-      sessionDuration:     parseInt(sessionDuration)     || 45,
-      trainingDaysPerWeek: parseInt(trainingDaysPerWeek) || 4,
-      limitations:         limitations || undefined,
-      userId:              req.user.id,
+    const plan = await workoutGenerator.generateWorkoutPlan({
+      ...req.body,
+      userId: req.user.id,
     });
 
-    res.json({ success: true, plan, message: 'Workout plan generated successfully!' });
-
+    res.json({
+      success: true,
+      plan,
+      message: 'Your personalized workout plan is ready!'
+    });
   } catch (error: any) {
-    // Surface the real error message so the frontend can show exactly what went wrong.
-    // This is the key fix — the old code buried every error under a generic message.
-    const message = error?.message || 'Unknown error generating workout plan.';
-    console.error('[AI route] generateWorkoutPlan failed:', message);
+    console.error('Workout generator error:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to generate workout. Please try again.' 
+    });
+  }
+});
 
-    const status = message.includes('XAI_API_KEY') || message.includes('invalid or expired') ? 401
-                 : message.includes('rate limit') ? 429
-                 : 500;
+// NEW: Get progressive overload suggestion after logging a workout
+router.post('/suggest-progression', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { exerciseName, lastSets, lastReps, lastRPE } = req.body;
 
-    res.status(status).json({ success: false, message });
+    if (!exerciseName || !lastSets || !lastReps) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'exerciseName, lastSets, and lastReps are required' 
+      });
+    }
+
+    const suggestion = await workoutGenerator.suggestProgression(
+      req.user.id,
+      exerciseName,
+      parseInt(lastSets),
+      lastReps,
+      lastRPE ? parseInt(lastRPE) : undefined
+    );
+
+    res.json({
+      success: true,
+      suggestion
+    });
+  } catch (error: any) {
+    console.error('Progression suggestion error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to generate progression suggestion' 
+    });
   }
 });
 
