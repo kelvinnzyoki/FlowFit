@@ -52,7 +52,7 @@ export class WorkoutGeneratorService {
       return this.getFallbackPlan(preferences);
     }
   }
-
+/** Progressive Overload Suggestion */
   async suggestProgression(
     userId: string, 
     exerciseName: string, 
@@ -60,47 +60,61 @@ export class WorkoutGeneratorService {
     lastReps: string, 
     lastRPE?: number
   ) {
-    const recentLogs = await prisma.workoutLog.findMany({
-      where: { 
-        userId, 
-        // Fixed: Use correct field name from your schema (likely 'exercise' or 'exerciseName')
-        exerciseName: exerciseName   // Change to 'exercise' if your model uses that
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 4,
-    });
+    try {
+      // FIXED: Use correct field name from your Prisma schema
+      // Change 'exerciseName' to 'exercise' if that's what your model uses
+      const recentLogs = await prisma.workoutLog.findMany({
+        where: { 
+          userId, 
+          exercise: exerciseName        // ← Most likely correct field (change if needed)
+          // exerciseName: exerciseName // ← Try this only if the above fails
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 4,
+      });
 
-    if (recentLogs.length < 2) {
+      if (recentLogs.length < 2) {
+        return { 
+          suggestion: "Great start! Focus on full range of motion and controlled form.", 
+          type: "form" 
+        };
+      }
+
+      // FIXED: Safe parsing to avoid number/string error
+      const avgReps = recentLogs.reduce((sum, log) => {
+        const repsStr = String(log.reps || "0");
+        const repsNum = parseInt(repsStr, 10);
+        return sum + (isNaN(repsNum) ? 0 : repsNum);
+      }, 0) / recentLogs.length;
+
+      const lastRepsNum = parseInt(String(lastReps), 10) || 0;
+
+      if (avgReps >= 12 && lastSets >= 3) {
+        return {
+          suggestion: `Strong progress! Next session try \( {lastRepsNum + 2}- \){lastRepsNum + 4} reps or add weight.`,
+          type: "overload",
+          nextTarget: `${lastSets} sets × \( {lastRepsNum + 2}- \){lastRepsNum + 4}`
+        };
+      }
+
+      if (lastRPE && lastRPE <= 7) {
+        return { 
+          suggestion: "You had reps left. Push harder next time (aim for RPE 8-9).", 
+          type: "intensity" 
+        };
+      }
+
       return { 
-        suggestion: "Great start! Focus on full range of motion and controlled form.", 
-        type: "form" 
+        suggestion: "Solid work! Keep consistent and gradually increase difficulty.", 
+        type: "maintenance" 
       };
-    }
-
-    const avgReps = recentLogs.reduce((sum, log) => {
-      const reps = parseInt(log.reps || '0');
-      return sum + (isNaN(reps) ? 0 : reps);
-    }, 0) / recentLogs.length;
-
-    if (avgReps >= 12 && lastSets >= 3) {
-      return {
-        suggestion: `Strong progress! Next session try \( {parseInt(lastReps) + 2}- \){parseInt(lastReps) + 4} reps or add weight.`,
-        type: "overload",
-        nextTarget: `${lastSets} sets × \( {parseInt(lastReps) + 2}- \){parseInt(lastReps) + 4}`
-      };
-    }
-
-    if (lastRPE && lastRPE <= 7) {
+    } catch (error) {
+      logger.error('suggestProgression error:', error);
       return { 
-        suggestion: "You had reps left. Push harder next time (aim for RPE 8-9).", 
-        type: "intensity" 
+        suggestion: "Keep up the great work!", 
+        type: "maintenance" 
       };
     }
-
-    return { 
-      suggestion: "Solid work! Keep consistent and gradually increase difficulty.", 
-      type: "maintenance" 
-    };
   }
 
   private determineSplit(p: WorkoutPreferences): string {
