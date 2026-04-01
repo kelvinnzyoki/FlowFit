@@ -66,10 +66,7 @@ export class WorkoutGeneratorService {
         select: { 
           name: true, 
           category: true,
-          primaryMuscles: true,
-          secondaryMuscles: true,
-          difficulty: true,
-          equipment: true
+          
         }
       });
 
@@ -877,10 +874,10 @@ export class WorkoutGeneratorService {
           userId,
           createdAt: { gte: thirtyDaysAgo }
         },
-        select: { exerciseName: true }
+        select: { exerciseId: true }
       });
 
-      const exerciseSet = new Set(logs.map(log => log.exerciseName).filter(Boolean));
+      const exerciseSet = new Set(logs.map(log => log.exerciseId).filter(Boolean));
       return exerciseSet;
     } catch (error) {
       logger.error('Failed to fetch user history:', error);
