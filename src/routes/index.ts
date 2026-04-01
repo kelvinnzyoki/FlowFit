@@ -48,6 +48,10 @@ import subscriptionRoutes from './subscription.routes.js';
 import seedRouter from './seed.routes.js';
 import exerciseRoutes from './exercise.routes.js';
 import aiRoutes from './ai.routes.js';
+import workoutGeneratorRoutes from './ai.routes.js';   // or rename file to workoutGenerator.routes.ts
+
+
+   
    
 
 
@@ -76,6 +80,7 @@ router.use('/users',         userRoutes);
 router.use('/subscriptions', subscriptionRoutes);
 router.use('/exercises', exerciseRoutes);
 router.use('/ai', aiRoutes);
+router.use('/ai', workoutGeneratorRoutes);
 
 router.use('/admin', seedRouter);
 
