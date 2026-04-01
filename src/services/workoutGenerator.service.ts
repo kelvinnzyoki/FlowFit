@@ -661,7 +661,7 @@ export class WorkoutGeneratorService {
 
     // Mobility for advanced
     if (level === 'advanced') {
-      warmups.push('World's greatest stretch (5 reps/side)');
+      warmups.push("World's greatest stretch (5 reps/side)");
     }
 
     return warmups.join(' • ');
@@ -677,7 +677,7 @@ export class WorkoutGeneratorService {
     cooldowns.push('3-5 min slow walk or light movement');
 
     // Static stretching
-    cooldowns.push('Child's Pose (60s)');
+    cooldowns.push("Child's Pose (60s)");
     cooldowns.push('Downward Dog (45s)');
     cooldowns.push('Pigeon Pose (45s each side)');
     cooldowns.push('Seated Forward Fold (60s)');
