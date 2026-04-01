@@ -34,12 +34,16 @@ let _tokenCache: { token: string; expiresAt: number } | null = null;
 async function getOAuthToken(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
 
-  // 1. Try to get token from DB (assuming you add a 'SystemConfig' or 'Cache' table)
-  const cached = await prisma.systemConfig.findUnique({ where: { key: 'mpesa_token' } });
+  // Cast prisma to any to bypass TS errors if schema isn't fully generated yet
+  const cached = await (prisma as any).systemConfig.findUnique({ where: { key: 'mpesa_token' } });
   
   if (cached && (cached.expiresAt as number) > now + 60) {
     return cached.value;
   }
+
+  // Define keys locally
+  const CONSUMER_KEY = process.env.MPESA_CONSUMER_KEY!;
+  const CONSUMER_SECRET = process.env.MPESA_CONSUMER_SECRET!;
 
   // 2. If not in DB or expired, fetch from Safaricom
   const auth = Buffer.from(`${CONSUMER_KEY}:${CONSUMER_SECRET}`).toString('base64');
@@ -47,18 +51,18 @@ async function getOAuthToken(): Promise<string> {
     headers: { Authorization: `Basic ${auth}` }
   });
 
-  const data = await response.json();
+  const data = (await response.json()) as any; // Cast to any to fix 'unknown' type error
   const expiry = now + Number(data.expires_in);
 
   // 3. Save back to DB for next serverless invocation
-  await prisma.systemConfig.upsert({
+  await (prisma as any).systemConfig.upsert({
     where: { key: 'mpesa_token' },
     update: { value: data.access_token, expiresAt: expiry },
     create: { key: 'mpesa_token', value: data.access_token, expiresAt: expiry }
   });
 
   return data.access_token;
-}
+    }
 
 // ── STK Push ──────────────────────────────────────────────────────────────────
 
