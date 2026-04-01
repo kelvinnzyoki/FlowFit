@@ -34,7 +34,7 @@ function validateSafaricomAuth(req: Request): boolean {
 
 // ── Validation URL ─────────────────────────────────────────────────────────────
 router.post('/validation', (req: Request, res: Response) => {
-  if (!validateSafaricomIp(req)) {
+  if (!validateSafaricomAuth(req)) {
     console.warn('[mpesa-webhook] Rejected validation from unknown IP:', req.ip);
     return res.json({ ResultCode: '1', ResultDesc: 'Rejected' });
   }
@@ -47,7 +47,7 @@ router.post('/callback', async (req: Request, res: Response) => {
   // Always ACK immediately
   res.json({ ResultCode: '0', ResultDesc: 'Accepted' });
 
-  if (!validateSafaricomIp(req)) {
+  if (!validateSafaricomAuth(req)) {
     console.warn('[mpesa-webhook] Callback from unknown IP rejected:', req.ip);
     return;
   }
