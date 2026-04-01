@@ -118,35 +118,43 @@ export class WorkoutGeneratorService {
   }
 
   private determineSplit(p: WorkoutPreferences): string {
-    const { trainingDaysPerWeek, fitnessLevel } = p;
+    const { trainingDaysPerWeek, fitnessLevel, goal } = p;
+
     if (trainingDaysPerWeek >= 5 && fitnessLevel === 'advanced') return 'ppl';
     if (trainingDaysPerWeek >= 4) return 'upperlower';
-    if (p.goal === 'strength' || p.goal === 'muscle gain') return 'pushpull';
+    if (goal === 'strength' || goal === 'muscle gain') return 'pushpull';
     return 'fullbody';
   }
 
   private buildPlan(exercises: any[], p: WorkoutPreferences, split: string) {
     const rule = this.getRepRule(p.goal, p.fitnessLevel);
-    let pool = [...exercises].sort(() => Math.random() - 0.5);
+
+    // Better shuffling with seed based on inputs for controlled variety
+    let pool = this.smartShuffle(exercises, p);
 
     const selected: any[] = [];
+    const usedCategories = new Set<string>();
 
     if (split === 'fullbody') {
-      selected.push(this.pickByCategory(pool, ['STRENGTH']));
-      selected.push(this.pickByCategory(pool, ['STRENGTH']));
-      selected.push(this.pickByCategory(pool, ['CORE']));
-      selected.push(this.pickByCategory(pool, ['CARDIO', 'HIIT']));
-    } else if (split === 'upperlower') {
-      selected.push(this.pickByCategory(pool, ['STRENGTH']));
-      selected.push(this.pickByCategory(pool, ['STRENGTH', 'CORE']));
-    } else if (split === 'pushpull') {
-      selected.push(this.pickByCategory(pool, ['STRENGTH']));
-      selected.push(this.pickByCategory(pool, ['STRENGTH']));
-      selected.push(this.pickByCategory(pool, ['CORE']));
-    } else if (split === 'ppl') {
-      selected.push(this.pickByCategory(pool, ['STRENGTH']));
-      selected.push(this.pickByCategory(pool, ['STRENGTH']));
-      selected.push(this.pickByCategory(pool, ['STRENGTH', 'CORE']));
+      // Prioritize variety: Push → Pull → Legs → Core
+      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
+      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p)); // Second strength (often push/pull)
+      selected.push(this.pickBestExercise(pool, ['CORE'], usedCategories, p));
+      selected.push(this.pickBestExercise(pool, ['CARDIO', 'HIIT'], usedCategories, p));
+    } 
+    else if (split === 'upperlower') {
+      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
+      selected.push(this.pickBestExercise(pool, ['STRENGTH', 'CORE'], usedCategories, p));
+    } 
+    else if (split === 'pushpull') {
+      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
+      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
+      selected.push(this.pickBestExercise(pool, ['CORE'], usedCategories, p));
+    } 
+    else if (split === 'ppl') {
+      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
+      selected.push(this.pickBestExercise(pool, ['STRENGTH'], usedCategories, p));
+      selected.push(this.pickBestExercise(pool, ['STRENGTH', 'CORE'], usedCategories, p));
     }
 
     return {
@@ -154,7 +162,7 @@ export class WorkoutGeneratorService {
       focus: this.getSplitName(split),
       estimatedDurationMinutes: Math.min(p.sessionDuration, 60),
       warmUp: "5-10 minutes light cardio (Jumping Jacks or High Knees) + dynamic stretches",
-      exercises: selected.filter(Boolean).map(ex => ({
+      exercises: selected.filter(Boolean).map((ex: any) => ({
         name: ex.name,
         sets: rule.sets,
         reps: rule.reps,
@@ -167,6 +175,120 @@ export class WorkoutGeneratorService {
     };
   }
 
+  // Improved smart shuffle based on user inputs
+  private smartShuffle(exercises: any[], p: WorkoutPreferences): any[] {
+    let shuffled = [...exercises];
+
+    // Bias toward user's goal
+    if (p.goal === 'muscle gain' || p.goal === 'strength') {
+      shuffled.sort((a, b) => {
+        const aStrength = a.category === 'STRENGTH' ? 3 : 1;
+        const bStrength = b.category === 'STRENGTH' ? 3 : 1;
+        return bStrength - aStrength;
+      });
+    } else if (p.goal === 'fat loss') {
+      shuffled.sort((a, b) => {
+        const aCardio = ['CARDIO', 'HIIT'].includes(a.category) ? 3 : 1;
+        const bCardio = ['CARDIO', 'HIIT'].includes(b.category) ? 3 : 1;
+        return bCardio - aCardio;
+      });
+    }
+
+    // Final random shuffle for variety
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    return shuffled;
+  }
+
+  private pickBestExercise(pool: any[], preferredCategories: string[], used: Set<string>, p: WorkoutPreferences) {
+    // First try preferred categories
+    let candidates = pool.filter(ex => 
+      preferredCategories.some(cat => ex.category === cat) && !used.has(ex.name)
+    );
+
+    // Fallback to any available
+    if (candidates.length === 0) {
+      candidates = pool.filter(ex => !used.has(ex.name));
+    }
+
+    if (candidates.length === 0) return null;
+
+    // Pick one and mark as used
+    const chosen = candidates[0];
+    used.add(chosen.name);
+    pool.splice(pool.indexOf(chosen), 1);
+
+    return chosen;
+  }
+
+  // Keep your existing methods below (getRepRule, generateWorkoutName, getSplitName, etc.)
+  private getRepRule(goal: string, level: string) {
+    const rules: any = {
+      'muscle gain': { sets: level === 'advanced' ? 4 : 3, reps: '8-12', rest: 75 },
+      'fat loss':    { sets: 3, reps: '12-20', rest: 45 },
+      'strength':    { sets: level === 'advanced' ? 5 : 4, reps: '5-8', rest: 120 },
+      'endurance':   { sets: 3, reps: '15-25', rest: 40 },
+      'general fitness': { sets: 3, reps: '10-15', rest: 60 }
+    };
+    return rules[goal] || rules['general fitness'];
+  }
+
+  private generateWorkoutName(p: WorkoutPreferences) {
+    const map: any = {
+      'muscle gain': 'Hypertrophy Flow',
+      'fat loss': 'Metabolic Burn',
+      'strength': 'Strength Builder',
+      'endurance': 'Endurance Builder',
+      'general fitness': 'Total Body Flow'
+    };
+    return map[p.goal] || 'Custom FlowFit Session';
+  }
+
+  private getSplitName(split: string) {
+    const map: any = {
+      fullbody: 'Full Body',
+      upperlower: 'Upper / Lower',
+      pushpull: 'Push / Pull',
+      ppl: 'Push / Pull / Legs'
+    };
+    return map[split] || 'Custom Split';
+  }
+
+  private getExerciseNotes(ex: any, p: WorkoutPreferences) {
+    if (p.limitations?.toLowerCase().includes('wrist')) {
+      return 'Modify for wrist comfort (e.g. knee push-ups)';
+    }
+    return 'Bodyweight';
+  }
+
+  private getProgressionTips(p: WorkoutPreferences) {
+    return p.fitnessLevel === 'beginner'
+      ? "Master form first. Add 1-2 reps when it feels easy."
+      : "When you hit the upper rep range comfortably, increase weight or reps.";
+  }
+
+  private getFallbackPlan(p: WorkoutPreferences) {
+    return {
+      workoutName: "Safe Bodyweight Flow",
+      focus: "Full Body",
+      estimatedDurationMinutes: p.sessionDuration,
+      warmUp: "5 min light cardio + dynamic stretches",
+      exercises: [
+        { name: "Push-ups", sets: 3, reps: "8-12", restSeconds: 60, notes: "Knee version if needed" },
+        { name: "Squats", sets: 3, reps: "12-15", restSeconds: 60, notes: "" },
+        { name: "Plank", sets: 3, reps: "30-60 seconds", restSeconds: 45, notes: "Core tight" },
+      ],
+      coolDown: "Static stretching: Child's Pose, Downward Dog",
+      progressionTips: "Add reps when it feels easy."
+    };
+  }
+        }
+
+  
+
   private getRepRule(goal: string, level: string) {
     const rules = {
       'muscle gain': { sets: level === 'advanced' ? 4 : 3, reps: '8-12', rest: 75 },
@@ -178,15 +300,7 @@ export class WorkoutGeneratorService {
     return rules[goal as keyof typeof rules] || rules['general fitness'];
   }
 
-  private pickByCategory(pool: any[], categories: string[]) {
-    const filtered = pool.filter(ex => 
-      categories.some(cat => ex.category === cat)
-    );
-    if (filtered.length === 0) return null;
-    const chosen = filtered[0];
-    pool.splice(pool.indexOf(chosen), 1);
-    return chosen;
-  }
+  
 
   private generateWorkoutName(p: WorkoutPreferences) {
     const map: Record<string, string> = {
