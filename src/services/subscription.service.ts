@@ -415,16 +415,24 @@ export async function handleMpesaSuccess(
     return;
   }
 
-  // Idempotency: already processed
-  if (tx.status === 'SUCCESS') return;
+  // Replace the periodEnd calculation logic
+const now = new Date();
+let periodStart = now;
+let periodEnd: Date;
 
-  const now  = new Date();
-  const plan = tx.subscription?.plan;
+// If they already have an active sub, extend from the current end date
+// instead of starting from 'now' (prevents losing paid days)
+if (subscription.status === 'ACTIVE' && subscription.currentPeriodEnd && subscription.currentPeriodEnd > now) {
+  periodStart = subscription.currentPeriodEnd;
+}
 
-  // Billing window: 30 days for MONTHLY, 365 for YEARLY
-  const periodDays = tx.subscription?.interval === 'YEARLY' ? 365 : 30;
-  const periodEnd  = new Date(now.getTime() + periodDays * 86_400_000);
+const periodDays = tx.interval === 'YEARLY' ? 365 : 30;
+periodEnd = new Date(periodStart.getTime() + (periodDays * 24 * 60 * 60 * 1000));
 
+// Also: Add a safety check to ensure amount paid matches expected amount
+if (amountKes && amountKes < (tx.amountKes * 0.95)) { // 5% margin for rounding
+  throw new Error('Underpayment detected');
+}
   await prisma.$transaction(async (db) => {
     // Mark transaction complete
     await db.mpesaTransaction.update({
