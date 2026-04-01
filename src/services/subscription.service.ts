@@ -416,23 +416,31 @@ export async function handleMpesaSuccess(
   }
 
   // Replace the periodEnd calculation logic
-const now = new Date();
-let periodStart = now;
-let periodEnd: Date;
+const subscription = tx.subscription; // Extract the subscription explicitly
+  
+  if (!subscription) {
+    throw new Error('Subscription not attached to transaction');
+  }
 
-// If they already have an active sub, extend from the current end date
-// instead of starting from 'now' (prevents losing paid days)
-if (subscription.status === 'ACTIVE' && subscription.currentPeriodEnd && subscription.currentPeriodEnd > now) {
-  periodStart = subscription.currentPeriodEnd;
+  const now = new Date();
+  let periodStart = now;
+  let periodEnd: Date;
+
+  // If they already have an active sub, extend from the current end date
+  // instead of starting from 'now' (prevents losing paid days)
+  if (subscription.status === 'ACTIVE' && subscription.currentPeriodEnd && subscription.currentPeriodEnd > now) {
+    periodStart = subscription.currentPeriodEnd;
+  }
+
+  // Use subscription.interval instead of tx.interval
+  const periodDays = subscription.interval === 'YEARLY' ? 365 : 30;
+  periodEnd = new Date(periodStart.getTime() + (periodDays * 24 * 60 * 60 * 1000));
+
+  // Add a safety check to ensure amount paid matches expected amount
+  if (amountKes && amountKes < (tx.amountKes * 0.95)) { // 5% margin for rounding
+    throw new Error('Underpayment detected');
 }
 
-const periodDays = tx.interval === 'YEARLY' ? 365 : 30;
-periodEnd = new Date(periodStart.getTime() + (periodDays * 24 * 60 * 60 * 1000));
-
-// Also: Add a safety check to ensure amount paid matches expected amount
-if (amountKes && amountKes < (tx.amountKes * 0.95)) { // 5% margin for rounding
-  throw new Error('Underpayment detected');
-}
   await prisma.$transaction(async (db) => {
     // Mark transaction complete
     await db.mpesaTransaction.update({
