@@ -4,9 +4,9 @@ import { requireAuth } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
-// Main endpoint called by the AI Modal
 router.post('/generate-workout', requireAuth, async (req: Request, res: Response) => {
   try {
+    // Safe guard for req.user
     if (!req.user?.id) {
       return res.status(401).json({ 
         success: false, 
@@ -33,9 +33,12 @@ router.post('/generate-workout', requireAuth, async (req: Request, res: Response
   }
 });
 
-// NEW: Get progressive overload suggestion after logging a workout
 router.post('/suggest-progression', requireAuth, async (req: Request, res: Response) => {
   try {
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
     const { exerciseName, lastSets, lastReps, lastRPE } = req.body;
 
     if (!exerciseName || !lastSets || !lastReps) {
@@ -48,17 +51,14 @@ router.post('/suggest-progression', requireAuth, async (req: Request, res: Respo
     const suggestion = await workoutGenerator.suggestProgression(
       req.user.id,
       exerciseName,
-      parseInt(lastSets),
-      lastReps,
-      lastRPE ? parseInt(lastRPE) : undefined
+      Number(lastSets),
+      String(lastReps),
+      lastRPE ? Number(lastRPE) : undefined
     );
 
-    res.json({
-      success: true,
-      suggestion
-    });
+    res.json({ success: true, suggestion });
   } catch (error: any) {
-    console.error('Progression suggestion error:', error);
+    console.error('Progression suggestion error:', error.message);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to generate progression suggestion' 
