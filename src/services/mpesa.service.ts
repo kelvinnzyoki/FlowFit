@@ -30,33 +30,34 @@ const CALLBACK_URL = process.env.MPESA_CALLBACK_URL!;
 
 let _tokenCache: { token: string; expiresAt: number } | null = null;
 
+// Replace the _tokenCache logic with a DB lookup
 async function getOAuthToken(): Promise<string> {
-  if (_tokenCache && Date.now() < _tokenCache.expiresAt) {
-    return _tokenCache.token;
+  const now = Math.floor(Date.now() / 1000);
+
+  // 1. Try to get token from DB (assuming you add a 'SystemConfig' or 'Cache' table)
+  const cached = await prisma.systemConfig.findUnique({ where: { key: 'mpesa_token' } });
+  
+  if (cached && (cached.expiresAt as number) > now + 60) {
+    return cached.value;
   }
 
-  const creds = Buffer.from(
-    `${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`
-  ).toString('base64');
+  // 2. If not in DB or expired, fetch from Safaricom
+  const auth = Buffer.from(`${CONSUMER_KEY}:${CONSUMER_SECRET}`).toString('base64');
+  const response = await fetch(`${DARAJA_BASE}/oauth/v1/generate?grant_type=client_credentials`, {
+    headers: { Authorization: `Basic ${auth}` }
+  });
 
-  const res = await fetch(
-    `${DARAJA_BASE}/oauth/v1/generate?grant_type=client_credentials`,
-    { headers: { Authorization: `Basic ${creds}` } }
-  );
+  const data = await response.json();
+  const expiry = now + Number(data.expires_in);
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`M-Pesa OAuth failed (${res.status}): ${text}`);
-  }
+  // 3. Save back to DB for next serverless invocation
+  await prisma.systemConfig.upsert({
+    where: { key: 'mpesa_token' },
+    update: { value: data.access_token, expiresAt: expiry },
+    create: { key: 'mpesa_token', value: data.access_token, expiresAt: expiry }
+  });
 
-  const data = await res.json() as { access_token: string; expires_in: string };
-  _tokenCache = {
-    token:     data.access_token,
-    // Subtract 60s buffer so we refresh before expiry
-    expiresAt: Date.now() + (parseInt(data.expires_in) - 60) * 1000,
-  };
-
-  return _tokenCache.token;
+  return data.access_token;
 }
 
 // ── STK Push ──────────────────────────────────────────────────────────────────
