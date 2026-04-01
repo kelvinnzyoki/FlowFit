@@ -204,28 +204,21 @@ async function processEvent(event: Stripe.Event): Promise<void> {
 
     // ── Subscription updated (plan change, interval change, etc.) ─────────────
     case 'customer.subscription.updated': {
-      
       const stripeSub = event.data.object as Stripe.Subscription;
-      const newStatus = mapStripeStatus(stripeSub.status);
-      
-      await prisma.subscription.update({
-  where: { stripeSubscriptionId: stripeSub.id },
-  data: { 
-    status: newStatus,
-    currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
-    
-  },
-    });
+      let newStatus = mapStripeStatus(stripeSub.status); // Changed to 'let'
 
+      // Restored the query to find the 'sub' variable
+      const sub = await prisma.subscription.findFirst({
+        where: { stripeSubscriptionId: stripeSub.id },
+      });
+      if (!sub) return;
+
+      const prevStatus = sub.status; // Restored prevStatus
 
       // OVERRIDE: if subscription is paid and valid
-
-      if (
-  stripeSub.status === 'active' ||
-  stripeSub.status === 'trialing'
-) {
-  newStatus = stripeSub.status === 'trialing' ? 'TRIALING' : 'ACTIVE';
-}
+      if (stripeSub.status === 'active' || stripeSub.status === 'trialing') {
+        newStatus = stripeSub.status === 'trialing' ? 'TRIALING' : 'ACTIVE';
+  }
 
       // Detect trial → active conversion
       const prevAttrs      = event.data.previous_attributes as any;
