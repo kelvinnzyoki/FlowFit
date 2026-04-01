@@ -66,7 +66,7 @@ export class WorkoutGeneratorService {
       const recentLogs = await prisma.workoutLog.findMany({
         where: { 
           userId, 
-          exercise: exerciseName        // ← Most likely correct field (change if needed)
+          exerciseId: exerciseId        // ← Most likely correct field (change if needed)
           // exerciseName: exerciseName // ← Try this only if the above fails
         },
         orderBy: { createdAt: 'desc' },
