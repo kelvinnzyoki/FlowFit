@@ -204,14 +204,17 @@ async function processEvent(event: Stripe.Event): Promise<void> {
 
     // ── Subscription updated (plan change, interval change, etc.) ─────────────
     case 'customer.subscription.updated': {
+      
       const stripeSub = event.data.object as Stripe.Subscription;
-      const sub = await prisma.subscription.findFirst({
-        where: { stripeSubscriptionId: stripeSub.id },
-      });
-      if (!sub) return;
-
-      const prevStatus = sub.status;
-      let newStatus = mapStripeStatus(stripeSub.status);
+      const newStatus = mapStripeStatus(stripeSub.status);
+      
+      await prisma.subscription.update({
+  where: { stripeSubscriptionId: stripeSub.id },
+  data: { 
+    status: newStatus,
+    currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
+    
+  }
 
 
       // OVERRIDE: if subscription is paid and valid
