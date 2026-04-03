@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { workoutGenerator } from '../services/workoutGenerator.service.js';
 import { requireAuth } from '../middleware/auth.middleware.js';
+import { aiCoach } from '../services/aiCoach.service.js';
 
 const router = Router();
 
