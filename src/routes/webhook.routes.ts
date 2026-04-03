@@ -347,6 +347,12 @@ router.post(
       return;
     }
 
+    const eventAge = Date.now() / 1000 - event.created;
+  if (eventAge > 300) { // 5 minutes
+    console.warn(`[Webhook] Rejected old event: ${event.id} (age: ${eventAge}s)`);
+    return res.status(400).json({ error: 'Event too old' });
+  }
+
     // Idempotency check
     const alreadyProcessed = await prisma.webhookEvent.findUnique({
       where: { externalId: event.id },
