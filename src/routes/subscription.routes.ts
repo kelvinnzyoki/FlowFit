@@ -40,6 +40,16 @@ import prisma             from '../config/db.js';
 const router = Router();
 
 // ── Rate limiters ──────────────────────────────────────────────────────────────
+
+const trialLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000, // 24 hours
+  max: 3, // Max 3 trial attempts per day
+  message: { error: 'Too many trial attempts. Please try again tomorrow.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || req.ip, // Rate limit by user ID
+});
+
 const billingLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -216,6 +226,32 @@ router.post(
     body('interval').optional().isIn(['MONTHLY', 'YEARLY']).withMessage('interval must be MONTHLY or YEARLY'),
   ],
   async (req: Request, res: Response) => {
+
+    const hasAnyTrial = await prisma.subscription.findFirst({
+    where: { userId: req.user!.id, trialEndsAt: { not: null } },
+  });
+  
+  if (hasAnyTrial) {
+    return res.status(400).json({
+      success: false,
+      error: 'You have already used your trial period'
+    });
+  }
+// CHECK 2: No active paid subscription
+  const hasActiveSub = await prisma.subscription.findFirst({
+    where: {
+      userId: req.user!.id,
+      status: { in: ['ACTIVE', 'TRIALING'] },
+    },
+  });
+  
+  if (hasActiveSub) {
+    return res.status(400).json({
+      success: false,
+      error: 'You already have an active subscription'
+    });
+  }
+    
     if (!validate(req, res)) return;
 
     const { planId, interval = 'MONTHLY' } = req.body;
