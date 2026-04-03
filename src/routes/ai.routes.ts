@@ -66,4 +66,25 @@ router.post('/suggest-progression', requireAuth, async (req: Request, res: Respo
   }
 });
 
+router.post('/coach', requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    const { message, currentExercise } = req.body;
+
+    const response = await aiCoach.getResponse(req.user.id, message, {
+      userId: req.user.id,
+      currentExercise
+    });
+
+    res.json({ success: true, ...response });
+  } catch (error: any) {
+    console.error('AI Coach error:', error);
+    res.status(500).json({ success: false, message: 'Coach is taking a quick rest.' });
+  }
+});
+
+
 export default router;
