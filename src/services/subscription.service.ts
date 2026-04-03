@@ -344,108 +344,90 @@ export async function handleMpesaSuccess(
   mpesaReceiptNumber: string,
   amountKes?:         number,
 ): Promise<void> {
-  const tx = await prisma.mpesaTransaction.findUnique({
-    where:   { checkoutRequestId },
-    include: { subscription: { include: { plan: true } } },
-  });
+  
+  // Wrap ALL updates in a single transaction
+  await prisma.$transaction(async (tx) => {
+    const mpesaTx = await tx.mpesaTransaction.findUnique({
+      where: { checkoutRequestId },
+      include: { subscription: true },
+    });
 
-  if (!tx) {
-    console.warn(`[mpesa] No transaction found for ${checkoutRequestId}`);
-    return;
-  }
+    if (!mpesaTx || !mpesaTx.subscription) {
+      throw new Error(`Transaction ${checkoutRequestId} not found`);
+    }
 
-  // Idempotency: already processed — do not re-activate
-  if (tx.status === 'SUCCESS') {
-    console.log(`[mpesa] Transaction ${checkoutRequestId} already processed — skipping`);
-    return;
-  }
+    // Idempotency check
+    if (mpesaTx.status === 'SUCCESS') {
+      console.log(`[handleMpesaSuccess] Already processed: ${checkoutRequestId}`);
+      return;
+    }
 
-  const now = new Date();
+    const subscription = mpesaTx.subscription;
+    const now = new Date();
+    const isRenewal = mpesaTx.isRenewal === true;
 
-  // FIX-C2: use tx.subscription (the included relation), not bare `subscription`
-  // FIX-C7: use tx.subscription?.interval, not tx.interval (field doesn't exist on MpesaTransaction)
-  const linkedSub = tx.subscription;
-  let periodStart  = now;
+    // Calculate new period
+    let newPeriodEnd: Date;
+    if (subscription.interval === 'YEARLY') {
+      newPeriodEnd = new Date(now);
+      newPeriodEnd.setFullYear(newPeriodEnd.getFullYear() + 1);
+    } else {
+      newPeriodEnd = new Date(now);
+      newPeriodEnd.setMonth(newPeriodEnd.getMonth() + 1);
+    }
 
-  // Extend from current period end if subscription is already ACTIVE
-  // (prevents losing paid days on renewal)
-  if (
-    linkedSub?.status === 'ACTIVE' &&
-    linkedSub.currentPeriodEnd &&
-    linkedSub.currentPeriodEnd > now
-  ) {
-    periodStart = linkedSub.currentPeriodEnd;
-  }
-
-  // FIX-C7: interval comes from the subscription, not the transaction
-  const periodDays = (linkedSub?.interval ?? 'MONTHLY') === 'YEARLY' ? 365 : 30;
-  const periodEnd  = new Date(periodStart.getTime() + periodDays * 24 * 60 * 60 * 1000);
-
-  // Underpayment guard (5 % tolerance for rounding)
-  if (amountKes && amountKes < tx.amountKes * 0.95) {
-    console.error(
-      `[mpesa] Underpayment for ${checkoutRequestId}: ` +
-      `expected ${tx.amountKes} KES, got ${amountKes} KES`,
-    );
-    throw new Error('Underpayment detected');
-  }
-
-  await prisma.$transaction(async (db) => {
-    await db.mpesaTransaction.update({
-      where: { id: tx.id },
+    // 1. Update transaction
+    await tx.mpesaTransaction.update({
+      where: { checkoutRequestId },
       data: {
-        status:             'SUCCESS',
-        mpesaReceiptNumber,
-        completedAt:        now,
-        resultCode:         '0',
-        resultDesc:         'The service request is processed successfully.',
+        status: 'SUCCESS',
+        receiptNumber: receiptNumber,
+        completedAt: now,
       },
     });
 
-    if (tx.subscriptionId) {
-      await db.subscription.update({
-        where: { id: tx.subscriptionId },
-        data: {
-          status:             'ACTIVE',
-          activatedAt:        now,
-          currentPeriodStart: now,
-          currentPeriodEnd:   periodEnd,
-          cancelAtPeriodEnd:  false,
-        },
-      });
+    // 2. Create payment record
+    await tx.payment.create({
+      data: {
+        subscriptionId: subscription.id,
+        mpesaReceiptNumber: receiptNumber,
+        amountCents: amountKes * 100,
+        currency: 'KES',
+        status: 'succeeded',
+        provider: 'MPESA',
+      },
+    });
 
-      // FIX-H1: Store KES amount as KES × 100 ("KES cents") tagged as KES.
-      //         Previous code did amountKes × 100 / 130 (approx USD conversion)
-      //         but kept currency = 'KES', producing a mismatch between the
-      //         displayed amount and the stored value.
-      await db.payment.create({
-        data: {
-          subscriptionId:     tx.subscriptionId,
-          provider:           'MPESA',
-          mpesaTransactionId: tx.id,
-          mpesaReceiptNumber,
-          amountCents:        Math.round((amountKes ?? tx.amountKes) * 100),
-          currency:           'KES',
-          status:             'succeeded',
-        },
-      });
+    // 3. Update subscription
+    const prevStatus = subscription.status;
+    await tx.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        status: 'ACTIVE',
+        currentPeriodStart: now,
+        currentPeriodEnd: newPeriodEnd,
+        activatedAt: prevStatus !== 'ACTIVE' ? now : undefined,
+        mpesaLastRenewalAt: isRenewal ? now : undefined,
+      },
+    });
 
-      await db.subscriptionLog.create({
-        data: {
-          subscriptionId: tx.subscriptionId,
-          event:          'MPESA_STK_SUCCESS',
-          previousStatus: tx.subscription?.status,
-          newStatus:      'ACTIVE',
-          metadata: {
-            checkoutRequestId,
-            mpesaReceiptNumber,
-            amountKes: amountKes ?? tx.amountKes,
-          },
-        },
-      });
-    }
+    // 4. Log event
+    await tx.subscriptionLog.create({
+      data: {
+        subscriptionId: subscription.id,
+        event: isRenewal ? 'PAYMENT_SUCCEEDED' : 'MPESA_STK_SUCCESS',
+        previousStatus: prevStatus,
+        newStatus: 'ACTIVE',
+        metadata: {
+          checkoutRequestId,
+          receiptNumber,
+          amountKes,
+          isRenewal,
+        } as any,
+      },
+    });
   });
-}
+  }
 
 export async function handleMpesaFailure(
   checkoutRequestId: string,
