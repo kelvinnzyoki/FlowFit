@@ -381,7 +381,7 @@ export async function handleMpesaSuccess(
       where: { checkoutRequestId },
       data: {
         status: 'SUCCESS',
-        mpesaReceiptNumber: receiptNumber,
+        mpesaReceiptNumber: mpesaReceiptNumber,
         completedAt: now,
       },
     });
@@ -390,7 +390,7 @@ export async function handleMpesaSuccess(
     await tx.payment.create({
       data: {
         subscriptionId: subscription.id,
-        mpesaReceiptNumber: receiptNumber,
+        mpesaReceiptNumber: mpesaReceiptNumber,
         amountCents: (amountKes ?? 0) * 100,
         currency: 'KES',
         status: 'succeeded',
@@ -420,7 +420,7 @@ export async function handleMpesaSuccess(
         newStatus: 'ACTIVE',
         metadata: {
           checkoutRequestId,
-          receiptNumber,
+          mpesaReceiptNumber,
           amountKes,
           isRenewal,
         } as any,
