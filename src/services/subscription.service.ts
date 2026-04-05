@@ -381,7 +381,7 @@ export async function handleMpesaSuccess(
       where: { checkoutRequestId },
       data: {
         status: 'SUCCESS',
-        receiptNumber: receiptNumber,
+        mpesaReceiptNumber: receiptNumber,
         completedAt: now,
       },
     });
@@ -391,7 +391,7 @@ export async function handleMpesaSuccess(
       data: {
         subscriptionId: subscription.id,
         mpesaReceiptNumber: receiptNumber,
-        amountCents: amountKes * 100,
+        amountCents: (amountKes ?? 0) * 100,
         currency: 'KES',
         status: 'succeeded',
         provider: 'MPESA',
