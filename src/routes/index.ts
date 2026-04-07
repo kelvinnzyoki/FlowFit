@@ -80,7 +80,7 @@ router.use('/users',         userRoutes);
 router.use('/subscriptions', subscriptionRoutes);
 router.use('/exercises', exerciseRoutes);
 router.use('/ai', aiRoutes);
-router.use('/ai', workoutGeneratorRoutes);
+
 
 router.use('/admin', seedRouter);
 
