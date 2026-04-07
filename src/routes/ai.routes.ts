@@ -74,6 +74,12 @@ router.post('/coach', requireAuth, async (req: Request, res: Response) => {
     }
 
     const { message, currentExercise } = req.body;
+    if (!message || typeof message !== 'string') {
+  return res.status(400).json({
+    success: false,
+    message: 'Message is required'
+  });
+    }
 
     const response = await aiCoach.getResponse(req.user.id, message, {
       userId: req.user.id,
