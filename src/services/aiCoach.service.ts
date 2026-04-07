@@ -1,3 +1,4 @@
+// aiCoach.service.ts  ←  Replace your entire file with this
 import { PrismaClient } from '@prisma/client';
 import logger from '../utils/logger.js';
 
@@ -6,7 +7,6 @@ const prisma = new PrismaClient();
 interface CoachContext {
   userId: string;
   currentExercise?: string;
-  recentWorkout?: any;
 }
 
 interface ChatMessage {
@@ -20,111 +20,125 @@ export class AICoachService {
 
   async getResponse(userId: string, message: string, context: CoachContext) {
     const lower = message.toLowerCase().trim();
+
+    // Keep conversation history
     let history = this.conversationHistory.get(userId) || [];
     history.push({ role: 'user', content: message, timestamp: new Date() });
-    this.conversationHistory.set(userId, history.slice(-12)); // keep last 12 messages
+    this.conversationHistory.set(userId, history.slice(-12));
 
-    // Pull real user data for intelligence
-    const userLogs = await prisma.workoutLog.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 8,
-      include: { exercise: true }
-    });
+    let userLogs: any[] = [];
+    let userProfile: any = null;
 
-    const userProfile = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { subscriptions: true }
-    });
+    try {
+      // Safe Prisma calls with fallback
+      [userLogs, userProfile] = await Promise.all([
+        prisma.workoutLog.findMany({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+          take: 8,
+          include: { exercise: true }
+        }).catch(() => []),
+        
+        prisma.user.findUnique({
+          where: { id: userId },
+          include: { subscriptions: true }
+        }).catch(() => null)
+      ]);
+    } catch (e) {
+      logger.warn('AI Coach: Could not fetch user data (using fallback)', e);
+    }
 
     // 1. Form & Technique
     if (lower.includes('form') || lower.includes('technique') || lower.includes('how to')) {
       return this.handleFormTip(lower, context, userLogs);
     }
 
-    // 2. Injury / Pain / Modification
-    if (lower.includes('hurt') || lower.includes('pain') || lower.includes('wrist') || lower.includes('knee') || lower.includes('modify') || lower.includes('alternative')) {
+    // 2. Pain / Injury / Modification
+    if (lower.includes('hurt') || lower.includes('pain') || lower.includes('wrist') || 
+        lower.includes('knee') || lower.includes('modify') || lower.includes('alternative')) {
       return this.handleInjurySubstitution(lower, context, userLogs);
     }
 
-    // 3. Tired / Adjustment / Lighter session
-    if (lower.includes('tired') || lower.includes('fatigue') || lower.includes('lighter') || lower.includes('easy') || lower.includes('rest')) {
+    // 3. Tired / Lighter session
+    if (lower.includes('tired') || lower.includes('fatigue') || lower.includes('lighter') || 
+        lower.includes('easy') || lower.includes('rest')) {
       return this.handleAdjustmentRequest(userLogs, userProfile);
     }
 
     // 4. Motivation
-    if (lower.includes('motivate') || lower.includes('hard') || lower.includes('struggle') || lower.includes('give up')) {
+    if (lower.includes('motivate') || lower.includes('hard') || lower.includes('struggle') || 
+        lower.includes('give up')) {
       return this.getPersonalizedMotivation(userId, userLogs);
     }
 
-    // 5. Recovery & Readiness
-    if (lower.includes('recover') || lower.includes('sore') || lower.includes('rest day') || lower.includes('tomorrow')) {
+    // 5. Recovery
+    if (lower.includes('recover') || lower.includes('sore') || lower.includes('rest day')) {
       return this.getRecoveryAdvice(userLogs);
     }
 
-    // 6. Predictive / Future events (plateau, deload, progress)
-    if (lower.includes('plateau') || lower.includes('stuck') || lower.includes('progress') || lower.includes('next') || lower.includes('future')) {
+    // 6. Progress / Future
+    if (lower.includes('plateau') || lower.includes('stuck') || lower.includes('progress') || 
+        lower.includes('next') || lower.includes('future')) {
       return this.predictFutureProgress(userLogs);
     }
 
-    // Default intelligent response
+    // Default smart reply
     return {
-      reply: "I'm your AI Coach. I see you've been consistent lately. What would you like help with today — form, substitutions, adjustments, or motivation?",
+      success: true,
+      reply: `Great question! I see you've been training consistently. What specifically would you like help with — form, pain adjustments, motivation, or something else?`,
       type: "general"
     };
   }
 
   private handleFormTip(message: string, context: CoachContext, logs: any[]) {
-    const exercise = context.currentExercise || 'Push-ups';
+    const exercise = context.currentExercise || 'the movement';
     return {
-      reply: `For ${exercise}: Brace your core, move with control, and breathe out on the effort. Elbows at 45° for push-ups. Great question — form is everything.`,
+      success: true,
+      reply: `For ${exercise}: Brace your core, move with control, and breathe out on the effort. Keep your elbows at 45° for push-ups. Form is everything!`,
       type: "form_tip"
     };
   }
 
   private handleInjurySubstitution(message: string, context: CoachContext, logs: any[]) {
-    const exercise = context.currentExercise || 'Push-ups';
-    const subs: Record<string, string[]> = {
-      'Push-ups': ['Pike Push-ups', 'Tricep Dips', 'Wall Push-ups'],
-      'Squats': ['Glute Bridges', 'Lunges'],
-      'Plank': ['Mountain Climbers', 'Bird-Dog'],
-      'Burpees': ['High Knees', 'Jumping Jacks']
-    };
+    const exercise = context.currentExercise || 'the exercise';
     return {
-      reply: `Smart to ask! If ${exercise} is causing discomfort, try these safe alternatives:`,
+      success: true,
+      reply: `Smart to ask! If ${exercise} is causing discomfort, try these safe alternatives: Pike Push-ups, Wall Push-ups, or Knee variations.`,
       type: "substitution",
-      alternatives: subs[exercise] || ['Knee variation', 'Wall version', 'Reduced range of motion']
+      alternatives: ['Pike Push-ups', 'Wall Push-ups', 'Knee variation']
     };
   }
 
   private handleAdjustmentRequest(logs: any[], profile: any) {
     return {
-      reply: "Understood. Let's make today's session more sustainable while still moving you forward.",
-      type: "adjustment",
-      suggestion: "Reduce volume by 20-30% and add 15-30 seconds extra rest between sets."
+      success: true,
+      reply: "Understood — let's make today's session more sustainable. Reduce volume by 20-30% and add extra rest between sets.",
+      type: "adjustment"
     };
   }
 
   private async getPersonalizedMotivation(userId: string, logs: any[]) {
-    const totalWorkouts = logs.length;
+    const total = logs.length;
     return {
-      reply: `You've already logged ${totalWorkouts} workouts recently. That's real commitment. The results are coming — keep showing up. One more rep. You've got this 💪`,
+      success: true,
+      reply: `You've already logged ${total} workouts recently. That's real commitment! The results are coming — keep showing up. One more rep. You've got this 💪`,
       type: "motivation"
     };
   }
 
   private getRecoveryAdvice(logs: any[]) {
     return {
-      reply: "Based on your recent sessions, I recommend taking an active recovery day with mobility work and light cardio if you're feeling sore.",
+      success: true,
+      reply: "Based on your recent sessions, I recommend an active recovery day with mobility work and light cardio if you're feeling sore.",
       type: "recovery"
     };
   }
 
   private predictFutureProgress(logs: any[]) {
     return {
-      reply: "Looking at your recent logs, you're showing strong progress on STRENGTH movements. I predict you'll break a new PR in the next 2-3 weeks if we keep the progressive overload consistent.",
-      type: "prediction",
-      nextMilestone: "Expected PR on Squats / Push-ups in 2-3 weeks"
+      success: true,
+      reply: "Looking at your recent logs, you're showing strong progress. I predict you'll break a new PR in the next 2-3 weeks if we keep the progressive overload consistent.",
+      type: "prediction"
     };
   }
 }
