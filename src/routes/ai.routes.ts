@@ -80,12 +80,16 @@ router.post('/coach', requireAuth, async (req: Request, res: Response) => {
       currentExercise
     });
 
-    res.json({ success: true, ...response });
+    // FIXED: Do NOT add success again — the service already returns it
+    res.json(response);
+
   } catch (error: any) {
     console.error('AI Coach error:', error);
-    res.status(500).json({ success: false, message: 'Coach is taking a quick rest.' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Coach is taking a quick rest. Please try again.' 
+    });
   }
 });
-
 
 export default router;
