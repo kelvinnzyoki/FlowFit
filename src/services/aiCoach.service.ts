@@ -210,7 +210,7 @@ export class AICoachService {
       case 'greeting':
         return this.handleGreeting(userId, userProfile, workoutLogs, progressData, context, session);
       case 'workout_request':
-        return this.handleWorkoutRequest(userId, userProfile, workoutLogs, context, intent, session);
+        return this.handleWorkoutRequest(userId, userProfile, workoutLogs, progressData, context, intent, session);
       case 'form_technique':
         return this.handleFormTechnique(lower, context, workoutLogs);
       case 'injury_pain':
@@ -1039,7 +1039,8 @@ export class AICoachService {
 
   // [Feature 6] Diet adaptation from progress data
   private getDietAdaptationFromProgress(weightTrend: string, progressData: any): string {
-    const goal = 'general_fitness';
+    type FitnessGoal = 'general_fitness' | 'fat_loss' | 'muscle_gain';
+    const goal: FitnessGoal = userProfile?.fitnessGoal || 'general_fitness';
     if (weightTrend === 'increasing' && goal === 'fat_loss') return 'Weight trending up. Consider reducing carbs by 50–100 calories on non-training days.';
     if (weightTrend === 'decreasing' && goal === 'muscle_gain') return 'Weight dropping. Increase daily calories by 200 — focus on protein and complex carbs.';
     if ((progressData?.consistency || 0) > 80)                return 'Great consistency! Consider a refeed day this week — slightly higher calories to avoid metabolic adaptation.';
