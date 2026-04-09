@@ -218,7 +218,7 @@ export class AICoachService {
       case 'motivation':
         return this.handleMotivation(userId, userProfile, workoutLogs, progressData, session);
       case 'progress_check':
-        return this.handleProgressCheck(userId, workoutLogs, progressData, session);
+        return this.handleProgressCheck(userId, userProfile, workoutLogs, progressData, session);
       case 'nutrition':
         return this.handleNutrition(userProfile, workoutLogs, intent, progressData);
       case 'recovery':
@@ -1010,7 +1010,7 @@ export class AICoachService {
   // [Feature 14+6] PROGRESS CHECK — predictive + diet adaptation
   // ═══════════════════════════════════════════════════════════════════
 
-  private async handleProgressCheck(userId: string, logs: any[], progressData: any, session: SessionState) {
+  private async handleProgressCheck(userId: string, userProfile: any, logs: any[], progressData: any, session: SessionState) {
     const weeklyWorkouts = this.getWeeklyWorkouts(logs);
     const improvements   = this.detectImprovements(logs);
     const prediction     = this.predictNextMilestone(logs);
