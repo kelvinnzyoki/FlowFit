@@ -1016,7 +1016,7 @@ export class AICoachService {
     const prediction     = this.predictNextMilestone(logs);
     const plateau        = this.detectPlateau(logs);
     const weightTrend    = (progressData as any)?.weightTrend || 'stable';
-    const dietAdaptation = this.getDietAdaptationFromProgress(weightTrend, progressData);
+    const dietAdaptation = this.getDietAdaptationFromProgress(userProfile, weightTrend, progressData);
 
     return {
       success: true,
