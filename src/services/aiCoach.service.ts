@@ -503,7 +503,7 @@ export class AICoachService {
 
   private async handleWorkoutRequest(
     userId: string, userProfile: any, workoutLogs: any[],
-    context: CoachContext, intent: any, session: SessionState
+    context: CoachContext, intent: any, progressData: any, session: SessionState
   ) {
     const fitnessLevel  = this.detectFitnessLevel(workoutLogs);
     const goal          = userProfile?.fitnessGoal || 'general_fitness';
