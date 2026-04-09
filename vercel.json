@@ -15,6 +15,7 @@
   "crons": [
   { "path": "/api/cron/reminders", "schedule": "0 8 * * *"  },
   { "path": "/api/cron/renew",     "schedule": "0 1 * * *"  },
+  { "path": "/internal/cron/reconcile", "schedule": "0 3 * * *" },
   { "path": "/api/cron/retry",     "schedule": "0 3 * * *"  },
   { "path": "/api/cron/expire",    "schedule": "0 2 * * *"  }
   ]
