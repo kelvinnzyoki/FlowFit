@@ -1080,7 +1080,7 @@ export class AICoachService {
     const goal        = userProfile?.fitnessGoal || 'general_fitness';
     const weight      = userProfile?.weight || 75;
     const tips        = this.getNutritionTips(goal, weight, progressData);
-    const dietAdjust  = this.getDietAdaptationFromProgress((progressData as any)?.weightTrend || 'stable', progressData);
+    const dietAdjust  = this.getDietAdaptationFromProgress(userProfile, (progressData as any)?.weightTrend || 'stable', progressData);
 
     return {
       success: true,
