@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "nodemon src/server.ts",
     "build": "npx prisma generate --schema=./prisma/schema.prisma && npx tsc",
-    "vercel-build": "npx prisma generate --schema=./prisma/schema.prisma && (npx prisma migrate resolve --rolled-back 20260623000000_add_notifications --schema=./prisma/schema.prisma 2>/dev/null || true) && npx prisma migrate deploy --schema=./prisma/schema.prisma && npx tsc",
+    "vercel-build": "npx prisma generate --schema=./prisma/schema.prisma && (npx prisma migrate resolve --rolled-back 20260623000000_add_skipped --schema=./prisma/schema.prisma 2>/dev/null || true) && npx prisma migrate deploy --schema=./prisma/schema.prisma && npx tsc",
     "postinstall": "npx prisma generate --schema=./prisma/schema.prisma",
     "start": "node dist/src/server.js",
     "prisma:generate": "prisma generate",
