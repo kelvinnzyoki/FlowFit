@@ -1038,7 +1038,7 @@ export class AICoachService {
   }
 
   // [Feature 6] Diet adaptation from progress data
-  private getDietAdaptationFromProgress(weightTrend: string, progressData: any): string {
+  private getDietAdaptationFromProgress(userProfile: any, weightTrend: string, progressData: any): string {
     type FitnessGoal = 'general_fitness' | 'fat_loss' | 'muscle_gain';
     const goal: FitnessGoal = userProfile?.fitnessGoal || 'general_fitness';
     if (weightTrend === 'increasing' && goal === 'fat_loss') return 'Weight trending up. Consider reducing carbs by 50–100 calories on non-training days.';
