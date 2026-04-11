@@ -99,8 +99,9 @@ async function issueOtp(email: string, purpose: string): Promise<string> {
   return code;  // plaintext — handed back to the route to send/return
 }
 
+
 /**
- * Verify an OTP.  Returns true and marks it used if correct and unexpired.
+ * Verify an OTP. Returns true and marks it used + user as verified if correct.
  * Returns false otherwise (wrong code, expired, already used).
  */
 async function verifyOtp(email: string, code: string, purpose: string): Promise<boolean> {
@@ -127,16 +128,15 @@ async function verifyOtp(email: string, code: string, purpose: string): Promise<
       data: { usedAt: new Date() },
     }),
 
-    // ✅ THIS is the missing piece
-    // Replace the user update with this:
-prisma.user.update({
+    // ✅ Mark the user as email-verified (this is all you need)
+    prisma.user.update({
       where: { email },
-      data: { name, email, isEmailVerified, password: hashedPassword },
+      data: { isEmailVerified: true },
     }),
   ]);
 
   return true;
-}
+             }
 // ─── POST /api/v1/auth/register ──────────────────────────────────────────────
 router.post('/register', authLimiter, async (req: Request, res: Response) => {
   try {
@@ -161,27 +161,28 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
     const hashedPassword = await bcrypt.hash(password, 12);
 
     const user = await prisma.$transaction(async (tx) => {
-      const newUser = await tx.user.create({
-        data: { name, email, isEmailVerified, password: hashedPassword },
-        select: { id: true, name: true, email: true, isEmailVerified: false, role: true, createdAt: true },
-      });
-      await tx.profile.create({ data: { userId: newUser.id } });
-      return newUser;
-    });
-
-    const { accessToken, refreshToken } = generateTokens(user.id);
-    await storeRefreshToken(user.id, refreshToken);
-
-    setRefreshCookie(res, refreshToken);
-    res.status(201).json({
-      success: true,
-      data: { user, accessToken },   // refreshToken is in the httpOnly cookie, not the body
-    });
-  } catch (error) {
-    console.error('Register error:', error);
-    res.status(500).json({ success: false, error: 'Registration failed. Please try again.' });
+  const newUser = await tx.user.create({
+    data: { 
+      name, 
+      email, 
+      isEmailVerified: false,     // ← was missing the ": false"
+      password: hashedPassword 
+    },
+    select: { 
+      id: true, 
+      name: true, 
+      email: true, 
+      isEmailVerified: true,      // ← was "false" (invalid in select)
+      role: true, 
+      createdAt: true 
+    },
+  });
+  await tx.profile.create({ data: { userId: newUser.id } });
+  return newUser;
+});
   }
 });
+  
 
 // ─── GET /api/v1/auth/check-email ────────────────────────────────────────────
 // Called by register.html as the user types their email.
