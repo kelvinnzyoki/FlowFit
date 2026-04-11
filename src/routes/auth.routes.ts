@@ -244,17 +244,19 @@ router.post('/send-otp', authLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    // For registration: reject if email already registered
-    if (purpose === 'registration') {
-      const existing = await prisma.user.findUnique({
-        where:  { email: email.toLowerCase().trim() },
-        select: { id: true },
-      });
-      if (existing) {
-        res.status(409).json({ success: false, error: 'An account with that email already exists.' });
-        return;
-      }
-    }
+    // For registration: reject ONLY if email is already fully verified
+if (purpose === 'registration') {
+  const existing = await prisma.user.findUnique({
+    where:  { email: email.toLowerCase().trim() },
+    select: { isEmailVerified: true },
+  });
+
+  if (existing?.isEmailVerified === true) {
+    res.status(409).json({ success: false, error: 'An account with that email already exists.' });
+    return;
+  }
+  // If user doesn't exist yet OR exists but is unverified → allow (we create in /register)
+}
 
     // For password_reset: reject if email NOT registered
     if (purpose === 'password_reset') {
