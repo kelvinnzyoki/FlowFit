@@ -129,16 +129,10 @@ async function verifyOtp(email: string, code: string, purpose: string): Promise<
 
     // ✅ THIS is the missing piece
     // Replace the user update with this:
-prisma.user.upsert({
-  where: { email },
-  update: { isEmailVerified: true },
-  create: {
-    email,
-    // add other required fields (password, name, etc.)
-    isEmailVerified: true,
-    // ...
-  },
-}),
+prisma.user.update({
+      where: { email },
+      data: { name, email, isEmailVerified, password: hashedPassword },
+    }),
   ]);
 
   return true;
@@ -168,8 +162,8 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
 
     const user = await prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
-        data: { name, email, password: hashedPassword },
-        select: { id: true, name: true, email: true, role: true, createdAt: true },
+        data: { name, email, isEmailVerified, password: hashedPassword },
+        select: { id: true, name: true, email: true, isEmailVerified: false, role: true, createdAt: true },
       });
       await tx.profile.create({ data: { userId: newUser.id } });
       return newUser;
