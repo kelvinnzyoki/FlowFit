@@ -117,39 +117,33 @@ async function verifyOtp(email: string, code: string, purpose: string): Promise<
   });
 
   if (!record) {
-    console.log("No OTP found");
+    console.log("No OTP record found");
     return false;
   }
 
-  const match = await bcrypt.compare(code, record.codeHash);
+  const match = await bcrypt.compare(String(code), record.codeHash);
+
   if (!match) {
-    console.log("Invalid OTP");
+    console.log("Code mismatch");
     return false;
   }
 
-  try {
-    await prisma.$transaction(async (tx) => {
-      await tx.otpCode.update({
-        where: { id: record.id },
-        data: { usedAt: new Date() },
-      });
-
-      if (purpose === 'registration') {
-        const updated = await tx.user.update({
-          where: { email: normalizedEmail },
-          data: { isEmailVerified: true },
-        });
-
-        console.log("User updated:", updated);
-      }
+  await prisma.$transaction(async (tx) => {
+    await tx.otpCode.update({
+      where: { id: record.id },
+      data: { usedAt: new Date() },
     });
-  } catch (err) {
-    console.error("Verification failed:", err);
-    return false;
-  }
+
+    if (purpose === 'registration') {
+      await tx.user.update({
+        where: { email: normalizedEmail },
+        data: { isEmailVerified: true },
+      });
+    }
+  });
 
   return true;
-        }
+}
 // ─── POST /api/v1/auth/register ──────────────────────────────────────────────
 router.post('/register', authLimiter, async (req: Request, res: Response) => {
   try {
