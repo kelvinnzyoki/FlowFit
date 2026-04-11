@@ -138,6 +138,8 @@ async function verifyOtp(email: string, code: string, purpose: string): Promise<
   return true;
              }
 // ─── POST /api/v1/auth/register ──────────────────────────────────────────────
+
+  // ─── POST /api/v1/auth/register ──────────────────────────────────────────────
 router.post('/register', authLimiter, async (req: Request, res: Response) => {
   try {
     const { name, email, password } = req.body;
@@ -161,28 +163,41 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
     const hashedPassword = await bcrypt.hash(password, 12);
 
     const user = await prisma.$transaction(async (tx) => {
-  const newUser = await tx.user.create({
-    data: { 
-      name, 
-      email, 
-      isEmailVerified: false,     // ← was missing the ": false"
-      password: hashedPassword 
-    },
-    select: { 
-      id: true, 
-      name: true, 
-      email: true, 
-      isEmailVerified: true,      // ← was "false" (invalid in select)
-      role: true, 
-      createdAt: true 
-    },
-  });
-  await tx.profile.create({ data: { userId: newUser.id } });
-  return newUser;
-});
+      const newUser = await tx.user.create({
+        data: { 
+          name, 
+          email, 
+          isEmailVerified: false,
+          password: hashedPassword 
+        },
+        select: { 
+          id: true, 
+          name: true, 
+          email: true, 
+          isEmailVerified: true,
+          role: true, 
+          createdAt: true 
+        },
+      });
+      await tx.profile.create({ data: { userId: newUser.id } });
+      return newUser;
+    });
+
+    // Continue with the rest of the registration flow
+    const { accessToken, refreshToken } = generateTokens(user.id);
+    await storeRefreshToken(user.id, refreshToken);
+
+    setRefreshCookie(res, refreshToken);
+
+    res.status(201).json({
+      success: true,
+      data: { user, accessToken },
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(500).json({ success: false, error: 'Registration failed. Please try again.' });
   }
 });
-  
 
 // ─── GET /api/v1/auth/check-email ────────────────────────────────────────────
 // Called by register.html as the user types their email.
