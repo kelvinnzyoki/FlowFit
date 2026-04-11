@@ -119,11 +119,19 @@ async function verifyOtp(email: string, code: string, purpose: string): Promise<
   const match = await bcrypt.compare(code, record.codeHash);
   if (!match) return false;
 
-  // Mark consumed so it can't be replayed
-  await prisma.otpCode.update({
+  await prisma.$transaction(async (tx) => {
+  await tx.otpCode.update({
     where: { id: record.id },
-    data:  { usedAt: new Date() },
+    data: { usedAt: new Date() },
   });
+
+  if (purpose === 'signup') {
+    await tx.user.update({
+      where: { email },
+      data: { isEmailVerified: true },
+    });
+  }
+});
 
   return true;
 }
