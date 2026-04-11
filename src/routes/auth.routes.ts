@@ -128,10 +128,13 @@ async function verifyOtp(email: string, code: string, purpose: string): Promise<
     }),
 
     // ✅ THIS is the missing piece
-    prisma.user.update({
-      where: { email },
-      data: { isEmailVerified: true },
-    }),
+    prisma.user.create({
+  data: {
+    email,
+    // ... other fields from the registration payload
+    isEmailVerified: true,
+  },
+}),
   ]);
 
   return true;
