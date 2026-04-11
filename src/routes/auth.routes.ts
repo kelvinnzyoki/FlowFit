@@ -134,7 +134,7 @@ async function verifyOtp(email: string, code: string, purpose: string): Promise<
         data: { usedAt: new Date() },
       });
 
-      if (purpose === 'signup') {
+      if (purpose === 'registration') {
         const updated = await tx.user.update({
           where: { email: normalizedEmail },
           data: { isEmailVerified: true },
