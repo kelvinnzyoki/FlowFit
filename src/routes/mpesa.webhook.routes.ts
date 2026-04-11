@@ -19,6 +19,8 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../config/db.js';
 import { parseStkCallback } from '../services/mpesa.service.js';
+import { initMpesaPayment } from '../services/mpesa.service.js';
+import { requireAuth } from '../middleware/auth.middleware.js';
 import { handleMpesaSuccess, handleMpesaFailure } from '../services/subscription.service.js';
 
 const router = Router();
@@ -63,30 +65,41 @@ function validateSafaricomAuth(req: Request): boolean {
 }
 
 router.post('/initiate', requireAuth, async (req, res) => {
-    try {
-        const { planId, phoneNumber, interval } = req.body;
-        
-        // ✅ Extract userId from authenticated request
-        const userId = req.user?.id;
-        
-        if (!userId) {
-            return res.status(401).json({ 
-                error: 'User not authenticated' 
-            });
-        }
-        
-        // ✅ Pass userId to service
-        const result = await initMpesaPayment(
-            planId, 
-            phoneNumber, 
-            interval, 
-            userId  // ✅ Pass it here
-        );
-        
-        res.json(result);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
+  try {
+    const { planId, phoneNumber, interval } = req.body;
+
+    // ✅ FIX: Extract userId from auth middleware
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        error: 'User not authenticated'
+      });
     }
+
+    if (!planId || !phoneNumber || !interval) {
+      return res.status(400).json({
+        error: 'Missing required fields'
+      });
+    }
+
+    // ✅ FIX: pass userId into service
+    const result = await initMpesaPayment(
+      planId,
+      phoneNumber,
+      interval,
+      userId
+    );
+
+    res.json(result);
+
+  } catch (error: any) {
+    console.error('M-Pesa initiate error:', error);
+
+    res.status(400).json({
+      error: error.message || 'Failed to initiate M-Pesa payment'
+    });
+  }
 });
 
 
