@@ -104,38 +104,52 @@ async function issueOtp(email: string, purpose: string): Promise<string> {
  * Returns false otherwise (wrong code, expired, already used).
  */
 async function verifyOtp(email: string, code: string, purpose: string): Promise<boolean> {
+  const normalizedEmail = email.toLowerCase().trim();
+
   const record = await prisma.otpCode.findFirst({
     where: {
-      email,
+      email: normalizedEmail,
       purpose,
-      usedAt:    null,                    // not already consumed
-      expiresAt: { gt: new Date() },      // not expired
+      usedAt: null,
+      expiresAt: { gt: new Date() },
     },
-    orderBy: { createdAt: 'desc' },       // most recent first
+    orderBy: { createdAt: 'desc' },
   });
 
-  if (!record) return false;
+  if (!record) {
+    console.log("No OTP found");
+    return false;
+  }
 
   const match = await bcrypt.compare(code, record.codeHash);
-  if (!match) return false;
-
-  await prisma.$transaction(async (tx) => {
-  await tx.otpCode.update({
-    where: { id: record.id },
-    data: { usedAt: new Date() },
-  });
-
-  if (purpose === 'signup') {
-    await tx.user.update({
-      where: { email },
-      data: { isEmailVerified: true },
-    });
+  if (!match) {
+    console.log("Invalid OTP");
+    return false;
   }
-});
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.otpCode.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      });
+
+      if (purpose === 'signup') {
+        const updated = await tx.user.update({
+          where: { email: normalizedEmail },
+          data: { isEmailVerified: true },
+        });
+
+        console.log("User updated:", updated);
+      }
+    });
+  } catch (err) {
+    console.error("Verification failed:", err);
+    return false;
+  }
 
   return true;
-}
-
+        }
 // ─── POST /api/v1/auth/register ──────────────────────────────────────────────
 router.post('/register', authLimiter, async (req: Request, res: Response) => {
   try {
