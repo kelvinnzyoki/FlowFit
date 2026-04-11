@@ -278,8 +278,7 @@ model Subscription {
 
 model MpesaTransaction {
   id String @id @default(uuid())
-planId    String   // ← This is required (no ?)
-  plan      Plan     @relation(fields: [planId], references: [id])
+
 
 
   // FIX: subscriptionId is nullable (String?) so that the migration can
