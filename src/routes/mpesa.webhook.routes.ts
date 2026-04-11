@@ -62,6 +62,34 @@ function validateSafaricomAuth(req: Request): boolean {
   return true;
 }
 
+router.post('/initiate', requireAuth, async (req, res) => {
+    try {
+        const { planId, phoneNumber, interval } = req.body;
+        
+        // ✅ Extract userId from authenticated request
+        const userId = req.user?.id;
+        
+        if (!userId) {
+            return res.status(401).json({ 
+                error: 'User not authenticated' 
+            });
+        }
+        
+        // ✅ Pass userId to service
+        const result = await initMpesaPayment(
+            planId, 
+            phoneNumber, 
+            interval, 
+            userId  // ✅ Pass it here
+        );
+        
+        res.json(result);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
+
 // ── Validation URL ─────────────────────────────────────────────────────────────
 router.post('/validation', (req: Request, res: Response) => {
   // FIX-C1: was validateSafaricomIp — renamed to validateSafaricomAuth
