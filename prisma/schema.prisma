@@ -285,6 +285,7 @@ model MpesaTransaction {
   // succeed against the 28 existing rows that pre-date this field.
   // New rows from /mpesa/initiate always supply a subscriptionId.
   subscriptionId String?
+  planId              String
   userId         String
 
   // FIX: onDelete: SetNull matches the nullable foreign key above.
