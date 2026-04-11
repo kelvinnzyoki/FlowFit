@@ -238,54 +238,38 @@ export async function initMpesaPayment(
   interval: 'MONTHLY' | 'YEARLY',
   userId: string
 ) {
-  // ✅ FIX 1: correct model name
-  const plan = await prisma.subscription.findUnique({
-    where: { id: planId }
-  });
+  const plan = await prisma.plan.findUnique({
+  where: { id: planId }
+});
 
-  if (!plan) {
-    throw new Error('Plan not found');
-  }
+if (!plan) throw new Error('Plan not found');
 
-  // ⚠️ adjust field names based on your schema
-  const amountKes =
-    interval === 'YEARLY'
-      ? plan.yearlyPrice
-      : plan.monthlyPrice;
+// adjust field names based on YOUR schema
+const amountKes =
+  interval === 'YEARLY'
+    ? plan.yearlyPriceKes
+    : plan.monthlyPriceKes;
 
-  if (!amountKes || amountKes <= 0) {
-    throw new Error(`M-Pesa price not configured`);
-  }
+const stkResponse = await initiateStkPush(
+  phoneNumber,
+  amountKes,
+  `SUB-${plan.slug}`,
+  `${plan.name} sub`
+);
 
-  const stkResponse = await initiateStkPush(
+await prisma.mpesaTransaction.create({
+  data: {
+    checkoutRequestId: stkResponse.checkoutRequestId,
+    merchantRequestId: stkResponse.merchantRequestId,
     phoneNumber,
     amountKes,
-    `SUB-${plan.slug}`,
-    `${plan.name} sub`
-  );
+    status: MpesaTransactionStatus.PENDING,
 
-  const transaction = await prisma.mpesaTransaction.create({
-    data: {
-      checkoutRequestId: stkResponse.checkoutRequestId,
-      merchantRequestId: stkResponse.merchantRequestId,
-      phoneNumber,
-
-      // ✅ FIX 2: correct field name (adjust if needed)
-      amountKes: amountKes,
-
-      status: MpesaTransactionStatus.PENDING,
-
-      planId: planId,
-      userId: userId,
-      interval: interval,
-    }
-  });
-
-  return {
-    success: true,
-    checkoutRequestId: stkResponse.checkoutRequestId,
-    transactionId: transaction.id
-  };
+    planId,
+    userId,
+    interval
+  }
+});
 }
 
 
