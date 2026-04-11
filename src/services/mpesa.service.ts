@@ -13,6 +13,8 @@
  */
 
 import prisma from '../config/db.js';
+import { MpesaTransactionStatus } from '@prisma/client';
+
 
 const DARAJA_BASE = process.env.MPESA_ENVIRONMENT === 'production'
   ? 'https://api.safaricom.co.ke'
@@ -228,32 +230,61 @@ export function parseStkCallback(raw: any): MpesaCallbackBody {
 }
 
 
+
 export async function initMpesaPayment(
-    planId: string,
-    phoneNumber: string,
-    interval: 'MONTHLY' | 'YEARLY',
-    userId: string  // ✅ Add this parameter
+  planId: string,
+  phoneNumber: string,
+  interval: 'MONTHLY' | 'YEARLY',
+  userId: string
 ) {
-    // ... existing code ...
-    
-    // ✅ Include all required fields
-    const transaction = await prisma.mpesaTransaction.create({
-        data: {
-            checkoutRequestId: stkResponse.CheckoutRequestID,
-            phoneNumber,
-            amount: amountKes,
-            status: MpesaStatus.PENDING,
-            planId: planId,      // ✅ Required
-            userId: userId,      // ✅ Required
-            interval: interval,  // ✅ Required
-        }
-    });
-    
-    return {
-        success: true,
-        checkoutRequestId: stkResponse.CheckoutRequestID
-    };
-}
+  // 1. Fetch plan
+  const plan = await prisma.subscriptionPlan.findUnique({
+    where: { id: planId }
+  });
+
+  if (!plan) {
+    throw new Error('Plan not found');
+  }
+
+  const amountKes =
+    interval === 'YEARLY'
+      ? plan.yearlyPriceKes
+      : plan.monthlyPriceKes;
+
+  if (!amountKes || amountKes <= 0) {
+    throw new Error(`M-Pesa price not configured for ${interval}`);
+  }
+
+  // 2. Send STK push (✅ FIXED: correct function + naming)
+  const stkResponse = await initiateStkPush(
+    phoneNumber,
+    amountKes,
+    `SUB-${plan.slug}`,
+    `${plan.name} sub`
+  );
+
+  // 3. Save transaction (✅ FULL FIX)
+  const transaction = await prisma.mpesaTransaction.create({
+    data: {
+      checkoutRequestId: stkResponse.checkoutRequestId,   // ✅ FIX
+      merchantRequestId: stkResponse.merchantRequestId,   // ✅ ADD THIS
+      phoneNumber,
+      amount: amountKes,
+      status: MpesaTransactionStatus.PENDING,
+
+      // 🔥 CRITICAL FIX (from your error)
+      planId: planId,
+      userId: userId,
+      interval: interval,
+    }
+  });
+
+  return {
+    success: true,
+    checkoutRequestId: stkResponse.checkoutRequestId,
+    transactionId: transaction.id
+  };
+                         }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
