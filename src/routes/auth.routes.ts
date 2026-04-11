@@ -104,11 +104,9 @@ async function issueOtp(email: string, purpose: string): Promise<string> {
  * Returns false otherwise (wrong code, expired, already used).
  */
 async function verifyOtp(email: string, code: string, purpose: string): Promise<boolean> {
-  const normalizedEmail = email.toLowerCase().trim();
-
   const record = await prisma.otpCode.findFirst({
     where: {
-      email: normalizedEmail,
+      email,
       purpose,
       usedAt: null,
       expiresAt: { gt: new Date() },
@@ -116,31 +114,25 @@ async function verifyOtp(email: string, code: string, purpose: string): Promise<
     orderBy: { createdAt: 'desc' },
   });
 
-  if (!record) {
-    console.log("No OTP record found");
-    return false;
-  }
+  if (!record) return false;
 
-  const match = await bcrypt.compare(String(code), record.codeHash);
+  const match = await bcrypt.compare(code, record.codeHash);
+  if (!match) return false;
 
-  if (!match) {
-    console.log("Code mismatch");
-    return false;
-  }
-
-  await prisma.$transaction(async (tx) => {
-    await tx.otpCode.update({
+  // ✅ Use transaction to ensure consistency
+  await prisma.$transaction([
+    // mark OTP as used
+    prisma.otpCode.update({
       where: { id: record.id },
       data: { usedAt: new Date() },
-    });
+    }),
 
-    if (purpose === 'registration') {
-      await tx.user.update({
-        where: { email: normalizedEmail },
-        data: { isEmailVerified: true },
-      });
-    }
-  });
+    // ✅ THIS is the missing piece
+    prisma.user.update({
+      where: { email },
+      data: { isEmailVerified: true },
+    }),
+  ]);
 
   return true;
 }
