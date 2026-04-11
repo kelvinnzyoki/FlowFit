@@ -231,14 +231,15 @@ export function parseStkCallback(raw: any): MpesaCallbackBody {
 
 
 
+
 export async function initMpesaPayment(
   planId: string,
   phoneNumber: string,
   interval: 'MONTHLY' | 'YEARLY',
   userId: string
 ) {
-  // 1. Fetch plan
-  const plan = await prisma.subscriptionPlan.findUnique({
+  // ✅ FIX 1: correct model name
+  const plan = await prisma.subscription.findUnique({
     where: { id: planId }
   });
 
@@ -246,16 +247,16 @@ export async function initMpesaPayment(
     throw new Error('Plan not found');
   }
 
+  // ⚠️ adjust field names based on your schema
   const amountKes =
     interval === 'YEARLY'
-      ? plan.yearlyPriceKes
-      : plan.monthlyPriceKes;
+      ? plan.yearlyPrice
+      : plan.monthlyPrice;
 
   if (!amountKes || amountKes <= 0) {
-    throw new Error(`M-Pesa price not configured for ${interval}`);
+    throw new Error(`M-Pesa price not configured`);
   }
 
-  // 2. Send STK push (✅ FIXED: correct function + naming)
   const stkResponse = await initiateStkPush(
     phoneNumber,
     amountKes,
@@ -263,16 +264,17 @@ export async function initMpesaPayment(
     `${plan.name} sub`
   );
 
-  // 3. Save transaction (✅ FULL FIX)
   const transaction = await prisma.mpesaTransaction.create({
     data: {
-      checkoutRequestId: stkResponse.checkoutRequestId,   // ✅ FIX
-      merchantRequestId: stkResponse.merchantRequestId,   // ✅ ADD THIS
+      checkoutRequestId: stkResponse.checkoutRequestId,
+      merchantRequestId: stkResponse.merchantRequestId,
       phoneNumber,
-      amount: amountKes,
+
+      // ✅ FIX 2: correct field name (adjust if needed)
+      amountKes: amountKes,
+
       status: MpesaTransactionStatus.PENDING,
 
-      // 🔥 CRITICAL FIX (from your error)
       planId: planId,
       userId: userId,
       interval: interval,
@@ -284,7 +286,8 @@ export async function initMpesaPayment(
     checkoutRequestId: stkResponse.checkoutRequestId,
     transactionId: transaction.id
   };
-                         }
+}
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
