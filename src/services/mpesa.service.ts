@@ -227,6 +227,34 @@ export function parseStkCallback(raw: any): MpesaCallbackBody {
   };
 }
 
+
+export async function initMpesaPayment(
+    planId: string,
+    phoneNumber: string,
+    interval: 'MONTHLY' | 'YEARLY',
+    userId: string  // ✅ Add this parameter
+) {
+    // ... existing code ...
+    
+    // ✅ Include all required fields
+    const transaction = await prisma.mpesaTransaction.create({
+        data: {
+            checkoutRequestId: stkResponse.CheckoutRequestID,
+            phoneNumber,
+            amount: amountKes,
+            status: MpesaStatus.PENDING,
+            planId: planId,      // ✅ Required
+            userId: userId,      // ✅ Required
+            interval: interval,  // ✅ Required
+        }
+    });
+    
+    return {
+        success: true,
+        checkoutRequestId: stkResponse.CheckoutRequestID
+    };
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Safaricom timestamp format: YYYYMMDDHHmmss */
