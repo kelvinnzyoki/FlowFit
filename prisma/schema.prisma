@@ -102,9 +102,34 @@ model User {
   refreshTokens     RefreshToken[]
   mpesaTransactions MpesaTransaction[]
   notifications     Notification[]
+  mpesaPhone      String? 
+  phoneVerified   Boolean   @default(false)
+  phoneVerifiedAt DateTime?
+  phoneOtps  PhoneOtp[]
 
   @@map("users")
 }
+
+model PhoneOtp {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  phone     String   // normalised 254XXXXXXXXX
+  codeHash  String   // bcrypt hash of 6-digit code (never store plaintext)
+  attempts  Int      @default(0)  // wrong-code attempts (max 3 before void)
+
+  expiresAt DateTime  // 5 minutes after creation
+  usedAt    DateTime? // set when code is consumed or voided
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([phone])
+  @@index([expiresAt])
+  @@map("phone_otps")
+}
+
 
 model Profile {
   id                  String    @id @default(uuid())
