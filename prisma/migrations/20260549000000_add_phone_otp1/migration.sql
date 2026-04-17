@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS "phone_otps" (
 
   CONSTRAINT "phone_otps_userId_fkey"
     FOREIGN KEY ("userId")
-    REFERENCES "User"("id")
+    REFERENCES "users"("id")
     ON DELETE CASCADE
 );
 
