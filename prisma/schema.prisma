@@ -91,7 +91,7 @@ model User {
   updatedAt       DateTime  @updatedAt
 
   stripeCustomerId String? @unique
-  mpesaPhone       String?
+  
 
   profile           Profile?
   enrollments       ProgramEnrollment[]
