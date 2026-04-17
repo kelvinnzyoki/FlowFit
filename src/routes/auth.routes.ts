@@ -7,7 +7,7 @@ import prisma from '../config/db.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 
-import { verifyPhoneOtp, sendPhoneOtp } from '../phone.otp.routes.js';
+import { verifyPhoneOtp, sendPhoneOtp } from './phone.otp.routes.js';
 
 
 
