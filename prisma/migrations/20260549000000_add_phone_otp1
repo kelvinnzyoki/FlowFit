@@ -3,7 +3,6 @@
 -- ─────────────────────────────────────────────────────────────
 
 ALTER TABLE "users"
-ADD COLUMN IF NOT EXISTS "mpesaPhone" TEXT,
 ADD COLUMN IF NOT EXISTS "phoneVerified" BOOLEAN NOT NULL DEFAULT false,
 ADD COLUMN IF NOT EXISTS "phoneVerifiedAt" TIMESTAMP;
 
