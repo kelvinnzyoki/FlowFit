@@ -7,6 +7,12 @@ import prisma from '../config/db.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 
+import { verifyPhoneOtp, sendPhoneOtp } from '../phone.otp.routes.js';
+
+
+
+
+
 const router = Router();
 
 const JWT_ACCESS_SECRET  = process.env.JWT_ACCESS_SECRET  || 'change_me_access';
@@ -655,5 +661,11 @@ router.post('/change-password', authenticate, async (req: Request, res: Response
     res.status(500).json({ success: false, error: 'Failed to change password.' });
   }
 });
+
+// Send phone verification code 
+
+
+router.post('/send-phone-otp', sendPhoneOtp);
+router.post('/verify-phone-otp', verifyPhoneOtp);
 
 export default router;
