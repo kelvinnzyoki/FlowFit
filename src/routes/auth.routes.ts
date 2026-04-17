@@ -7,7 +7,9 @@ import prisma from '../config/db.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 
-import { verifyPhoneOtp, sendPhoneOtp } from './phone.otp.routes.js';
+import phoneOtpRoutes from './phone.otp.routes.js';
+
+
 
 
 
@@ -664,8 +666,6 @@ router.post('/change-password', authenticate, async (req: Request, res: Response
 
 // Send phone verification code 
 
-
-router.post('/send-phone-otp', sendPhoneOtp);
-router.post('/verify-phone-otp', verifyPhoneOtp);
+router.use('/', phoneOtpRoutes);
 
 export default router;
