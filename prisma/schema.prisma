@@ -631,3 +631,33 @@ model DailyStats {
   @@index([date])
   @@map("daily_stats")
 }
+
+
+// SEMANTIC MEMORY (embeddings for context retrieval)
+// ─────────────────────────────────────────────────────────────
+
+model Embedding {
+  id        String   @id @default(uuid())
+  userId    String
+  text      String   @db.Text       // original message text
+  vector    Json                    // number[] from text-embedding-3-small (1536 dims)
+                                    // stored as JSON — no pgvector extension required
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, createdAt])      // supports pruning query (ORDER BY createdAt DESC)
+  @@map("embeddings")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CONVERSATION MEMORY (behavioural state per user)
+// ─────────────────────────────────────────────────────────────
+
+model UserMemory {
+  id        String   @id @default(uuid())
+  userId    String   @unique          // one memory record per user
+  data      Json     @default("{}")   // ConversationMemory struct serialised as JSON
+  updatedAt DateTime @updatedAt
+
+  @@map("user_memories")
+}
