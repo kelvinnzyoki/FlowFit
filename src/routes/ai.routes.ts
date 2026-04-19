@@ -4,7 +4,7 @@
 import { Router, Request, Response } from 'express';
 import { workoutGenerator } from '../services/workoutGenerator.service.js';
 import { requireAuth }      from '../middleware/auth.middleware.js';
-import { aiCoach }          from '../services/aiiCoach.service.js'; // ✅ singleton matches export
+import { aiCoach }          from '../services/aiCoach.service.js'; // ✅ singleton matches export
 
 const router = Router();
 
