@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import prisma from '../config/db.js';
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'change_me_access';
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'change_me_refresh';
 
 export interface AuthenticatedUser {
   id:    string;
@@ -67,7 +68,12 @@ export const authenticate: RequestHandler = async (req, res, next) => {
       return;
     }
 
-    const decoded = jwt.verify(token, JWT_ACCESS_SECRET) as { userId: string };
+    
+    
+const secretToUse = headerToken ? JWT_ACCESS_SECRET : JWT_REFRESH_SECRET;
+
+const decoded = jwt.verify(token, secretToUse) as { userId: string };
+
 
     const user = await prisma.user.findUnique({
       where:  { id: decoded.userId },
