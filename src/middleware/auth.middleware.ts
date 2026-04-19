@@ -55,25 +55,32 @@ export type AuthRequest = Request;
 
 export const authenticate: RequestHandler = async (req, res, next) => {
   try {
-    // Cookie-first (ff_refresh is the httpOnly cookie); fall back to Bearer for API tools
-    const cookieToken  = req.cookies?.ff_refresh as string | undefined;
-    const headerToken  = req.headers.authorization?.startsWith('Bearer ')
+    const cookieToken = req.cookies?.ff_refresh as string | undefined;
+    const headerToken = req.headers.authorization?.startsWith('Bearer ')
       ? req.headers.authorization.slice(7)
       : undefined;
 
-    const token = cookieToken || headerToken;
+    let tokenToVerify = '';
+    let secretToUse = '';
 
-    if (!token) {
+    // 1. PRIORITY: Main SaaS uses the Bearer Access Token
+    if (headerToken) {
+      tokenToVerify = headerToken;
+      secretToUse = process.env.JWT_ACCESS_SECRET || 'change_me_access';
+    } 
+    // 2. FALLBACK: AI Coach uses the Refresh Cookie
+    else if (cookieToken) {
+      tokenToVerify = cookieToken;
+      secretToUse = process.env.JWT_REFRESH_SECRET || 'change_me_refresh';
+    } 
+    // 3. REJECT: No tokens provided
+    else {
       res.status(401).json({ success: false, error: 'Authentication required.' });
       return;
     }
 
-    
-    
-const secretToUse = headerToken ? JWT_ACCESS_SECRET : JWT_REFRESH_SECRET;
-
-const decoded = jwt.verify(token, secretToUse) as { userId: string };
-
+    // Verify using the dynamically selected secret
+    const decoded = jwt.verify(tokenToVerify, secretToUse) as { userId: string };
 
     const user = await prisma.user.findUnique({
       where:  { id: decoded.userId },
@@ -87,9 +94,10 @@ const decoded = jwt.verify(token, secretToUse) as { userId: string };
 
     req.user = user;
     next();
-  } catch {
+  } catch (error) {
     res.status(401).json({ success: false, error: 'Invalid or expired token.' });
   }
 };
+
 
 export const requireAuth = authenticate;
