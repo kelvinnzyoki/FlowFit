@@ -28,8 +28,8 @@ const prisma = new PrismaClient();
 // ─────────────────────────────────────────────────────────────
 
 const OLLAMA_API_KEY   = process.env.OLLAMA_API_KEY ?? '';
-const OLLAMA_CHAT_URL  = 'https://your-ollama-server.com/api/chat';
-const OLLAMA_EMBED_URL = 'https://your-ollama-server.com/api/embeddings';
+const OLLAMA_CHAT_URL  = 'http://localhost:11434/api/chat';
+const OLLAMA_EMBED_URL = 'http://localhost:11434/api/embed;
 const FETCH_TIMEOUT_MS = 20_000;   // 10 s — prevents infinite hangs
 const MAX_RETRIES      = 3;
 const MAX_EMBEDDINGS   = 200;      // per user — oldest pruned beyond this
@@ -212,7 +212,7 @@ User message: ${message}`;
       'Authorization': `Bearer ${OLLAMA_API_KEY},
     },
     body: JSON.stringify({
-      model: 'llama3',   // or mistral / gemma / phi3
+      model: 'gemma3',   // or mistral / gemma / phi3
       stream: false,
       messages: [
         { role: 'system', content: systemPrompt },
@@ -506,7 +506,7 @@ User message: ${message}`;
       'Authorization': `Bearer ${OLLAMA_API_KEY},
     },
     body: JSON.stringify({
-      model: 'nomic-embed-text', // MUST pull this model first
+      model: 'embeddinggemma', // MUST pull this model first
       prompt: text,
     }),
   });
