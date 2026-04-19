@@ -25,7 +25,8 @@ const REFRESH_COOKIE_OPTIONS = {
   secure:   IS_PROD,
   sameSite: (IS_PROD ? 'none' : 'lax') as 'none' | 'lax',
   maxAge:   7 * 24 * 60 * 60 * 1000,
-  path:     '/api/v1/auth',
+  domain: '.cctamcc.site',
+  path:     '/',
 };
 
 function setRefreshCookie(res: Response, token: string) {
