@@ -27,10 +27,10 @@ const prisma = new PrismaClient();
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────
 
-const OPENAI_API_KEY   = process.env.OPENAI_API_KEY ?? '';
-const OPENAI_CHAT_URL  = 'https://api.openai.com/v1/chat/completions';
-const OPENAI_EMBED_URL = 'https://api.openai.com/v1/embeddings';
-const FETCH_TIMEOUT_MS = 10_000;   // 10 s — prevents infinite hangs
+const OLLAMA_API_KEY   = process.env.OLLAMA_API_KEY ?? '';
+const OLLAMA_CHAT_URL  = 'https://your-ollama-server.com/api/chat';
+const OLLAMA_EMBED_URL = 'https://your-ollama-server.com/api/embeddings';
+const FETCH_TIMEOUT_MS = 20_000;   // 10 s — prevents infinite hangs
 const MAX_RETRIES      = 3;
 const MAX_EMBEDDINGS   = 200;      // per user — oldest pruned beyond this
 
@@ -185,67 +185,68 @@ class AICoachService {
   }
 
   // ── LLM CALL (fix #4 template literals, #5 validation, #9 timeout) ─────
+private async callLLM(
+  message: string,
+  memory:  ConversationMemory,
+  context: string[],
+): Promise<LLMStructured> {
 
-  private async callLLM(
-    message: string,
-    memory:  ConversationMemory,
-    context: string[],
-  ): Promise<LLMStructured> {
-    const systemPrompt = `You are FlowFit's elite AI fitness coach.
+  const systemPrompt = `You are FlowFit's elite AI fitness coach.
 Always respond with valid JSON matching exactly this shape:
 {
   "intent": "<string describing user intent>",
-  "tool": { "name": "<tool_name>", "args": <object or null> },  // optional
-  "response": "<conversational reply>"                           // always include
+  "tool": { "name": "<tool_name>", "args": <object or null> },
+  "response": "<conversational reply>"
 }
 Available tools: generate_workout, weekly_program, recovery_plan, log_workout, adaptive_adjustment.
 Only include "tool" when the user explicitly wants to take an action.`;
 
-    const userContent = `Memory: ${JSON.stringify(memory)}
+  const userContent = `Memory: ${JSON.stringify(memory)}
 Similar past messages: ${context.join('\n')}
 User message: ${message}`;
 
-    const res = await fetchWithRetry(OPENAI_CHAT_URL, {
-      method:  'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model:       'gpt-4o-mini',
-        temperature: 0.4,
-        response_format: { type: 'json_object' }, // forces JSON output
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userContent  },
-        ],
-      }),
-    });
+  const res = await fetchWithRetry(OLLAMA_CHAT_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OLLAMA_API_KEY},
+    },
+    body: JSON.stringify({
+      model: 'llama3',   // or mistral / gemma / phi3
+      stream: false,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: userContent },
+      ],
+    }),
+  });
 
-    if (!res.ok) {
-      const errBody = await res.text();
-      throw new Error(`OpenAI error ${res.status}: ${errBody}`);
-    }
-
-    const data = await res.json();
-    const raw  = data?.choices?.[0]?.message?.content;
-
-    if (typeof raw !== 'string') {
-      throw new Error('OpenAI returned no content');
-    }
-
-    // Safe parse + zod validation (fix #5)
-    const parsed = safeJsonParse(raw);
-    const result = LLMResponseSchema.safeParse(parsed);
-
-    if (!result.success) {
-      // LLM returned something unexpected — fall back to plain text response
-      console.warn('[AICoach] LLM response failed zod validation:', result.error.message);
-      return { intent: 'unknown', response: raw.slice(0, 500) };
-    }
-
-    return result.data;
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Ollama error ${res.status}: ${errBody}`);
   }
+
+  const data = await res.json();
+
+  // Ollama response format:
+  // data.message.content
+  const raw = data?.message?.content;
+
+  if (typeof raw !== 'string') {
+    throw new Error('Ollama returned no content');
+  }
+
+  // Safe parse + validation (same as your original)
+  const parsed = safeJsonParse(raw);
+  const result = LLMResponseSchema.safeParse(parsed);
+
+  if (!result.success) {
+    console.warn('[AICoach] LLM validation failed:', result.error.message);
+    return { intent: 'unknown', response: raw.slice(0, 500) };
+  }
+
+  return result.data;
+}
 
   // ── EXECUTION ─────────────────────────────────────────────────────────
 
@@ -497,21 +498,32 @@ User message: ${message}`;
   // ── EMBEDDINGS (fix #8 — capped, #14 — pruning, #9 — timeout) ────────
 
   private async generateEmbedding(text: string): Promise<number[]> {
-    const res = await fetchWithRetry(OPENAI_EMBED_URL, {
-      method:  'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({ model: 'text-embedding-3-small', input: text }),
-    });
 
-    if (!res.ok) {
-      throw new Error(`Embedding API error ${res.status}`);
-    }
+  const res = await fetchWithRetry(OLLAMA_EMBED_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OLLAMA_API_KEY},
+    },
+    body: JSON.stringify({
+      model: 'nomic-embed-text', // MUST pull this model first
+      prompt: text,
+    }),
+  });
 
-    const data = await res.json();
-    return data.data[0].embedding as number[];
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Ollama embedding error ${res.status}: ${errBody}`);
+  }
+
+  const data = await res.json();
+
+  // Ollama returns: { embedding: [...] }
+  if (!Array.isArray(data?.embedding)) {
+    throw new Error('Invalid embedding response from Ollama');
+  }
+
+  return data.embedding as number[];
   }
 
   private async storeEmbedding(
