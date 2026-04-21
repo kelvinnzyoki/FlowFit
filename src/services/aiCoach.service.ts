@@ -527,14 +527,15 @@ Never invent data. "response" is always required.`;
   // ── TOOLS ──────────────────────────────────────────────────
 
   private generateWorkout(ctx: UserContext): CoachResponse {
-    if (ctx.program?.nextExercises.length) {
-      const list = ctx.program.nextExercises.map(e => `• ${e}`).join('\n');
-      return {
-        success: true,
-        reply: `You're on **${ctx.program.title}**, Week ${ctx.program.currentWeek} Day ${ctx.program.currentDay}. Here's your session:\n\n${list}\n\nWarm up 5 min, rest 60–90 s between sets. Tell me when done!`,
-        data: { exercises: ctx.program.nextExercises, source: 'program' },
-      };
-    }
+  if (ctx.program?.nextExercises.length) {
+    // Already handled by nextWorkout in most cases
+    const list = ctx.program.nextExercises.map(e => `• **${e}**`).join('\n');
+    return {
+      success: true,
+      reply: `You're on **${ctx.program.title}**, Week ${ctx.program.currentWeek} Day \( {ctx.program.currentDay}.\n\n \){list}\n\nWarm up 5 min. Rest 60–90 s between sets.\n\nTell me when done!`,
+      data: { exercises: ctx.program.nextExercises, source: 'program' },
+    };
+  }
 
     type Def = { type: string; exercises: { name: string; sets: number; reps: string }[] };
     const workouts: Record<string, Def> = {
@@ -573,37 +574,46 @@ Never invent data. "response" is always required.`;
     };
 
     const w = workouts[ctx.fitnessLevel] ?? workouts['intermediate'];
-    const list = w.exercises.map(e => `• ${e.name}  ${e.sets}×${e.reps}`).join('\n');
-    const volNote = ctx.volumeChangePct < -10
-      ? '\n\n📉 Volume is down — focus on completing every set today.'
-      : ctx.volumeChangePct > 15 ? '\n\n📈 Great momentum! Build on it.' : '';
-    return {
-      success: true,
-      reply: `Here's your **${w.type}** for ${ctx.fitnessGoal}:\n\n${list}${volNote}\n\nReady? Tell me when you finish and I'll log it.`,
-      data: { workout: w, source: 'profile' },
-    };
+
+  const exercisesList = w.exercises.map(e => 
+    `**${e.name}** — \( {e.sets}× \){e.reps}`
+  ).join('\n\n');
+
+  const volNote = ctx.volumeChangePct < -10
+    ? `\n\n📉 Volume is down — focus on completing every set today.`
+    : ctx.volumeChangePct > 15 ? `\n\n📈 Great momentum! Build on it.` : '';
+
+  const reply = `**${w.type}** — ${ctx.fitnessGoal.toUpperCase()}\n\n` +
+                `\( {exercisesList} \){volNote}\n\n` +
+                `Warm up 5 minutes • Rest 60–90 s between sets\n\n` +
+                `Ready? Tell me when you finish and I'll log it for you!`;
+
+  return {
+    success: true,
+    reply,
+    data: { workout: w, source: 'profile' },
+  };
   }
 
   private async nextWorkout(userId: string, ctx: UserContext): Promise<CoachResponse> {
-    if (!ctx.program) {
-      return { success: true, reply: `You're not enrolled in a program. Want a custom session? Just say "give me a workout".` };
-    }
-    const { currentWeek, currentDay, title } = ctx.program;
-    const enrollment = await prisma.programEnrollment.findFirst({
-      where: { userId, isActive: true },
-      include: {
-        program: {
-          include: {
-            weeks: {
-              where: { weekNumber: currentWeek },
-              include: {
-                days: {
-                  where: { dayNumber: currentDay },
-                  include: {
-                    exercises: {
-                      include: { exercise: { select: { name: true, description: true, category: true, caloriesPerMin: true } } },
-                      orderBy: { orderIndex: 'asc' },
-                    },
+  if (!ctx.program) {
+    return { success: true, reply: `You're not enrolled in a program. Want a custom session? Just say "give me a workout".` };
+  }
+
+  const enrollment = await prisma.programEnrollment.findFirst({
+    where: { userId, isActive: true },
+    include: {
+      program: {
+        include: {
+          weeks: {
+            where: { weekNumber: ctx.program!.currentWeek },
+            include: {
+              days: {
+                where: { dayNumber: ctx.program!.currentDay },
+                include: {
+                  exercises: {
+                    include: { exercise: { select: { name: true, description: true, category: true } } },
+                    orderBy: { orderIndex: 'asc' },
                   },
                 },
               },
@@ -611,22 +621,35 @@ Never invent data. "response" is always required.`;
           },
         },
       },
-    });
-    const dayEx = enrollment?.program.weeks[0]?.days[0]?.exercises ?? [];
-    if (!dayEx.length) {
-      return { success: true, reply: `Couldn't load today's exercises for **${title}**. Check the Programs page.` };
-    }
-    const list = dayEx.map((de, i) =>
-      `${i + 1}. **${de.exercise.name}** [${de.exercise.category}]${de.exercise.description ? '\n   ' + de.exercise.description : ''}`
-    ).join('\n');
-    const fatNote = (ctx.fatigueScore ?? 0) >= 6
-      ? '\n\n⚠️ Fatigue elevated — reduce weight 10–15%, focus on form.' : '';
-    return {
-      success: true,
-      reply: `**${title}** — Week ${currentWeek}, Day ${currentDay}\n\n${list}${fatNote}\n\nWarm up 5–7 min. Tell me when done!`,
-      data: { exercises: dayEx.map(de => de.exercise), week: currentWeek, day: currentDay },
-    };
+    },
+  });
+
+  const dayEx = enrollment?.program.weeks[0]?.days[0]?.exercises ?? [];
+  if (!dayEx.length) {
+    return { success: true, reply: `Couldn't load today's exercises for **${ctx.program.title}**. Check the Programs page.` };
   }
+
+  const exercisesList = dayEx.map((de, i) => {
+    const desc = de.exercise.description ? `\n   ${de.exercise.description}` : '';
+    return `**${i + 1}. \( {de.exercise.name}** [ \){de.exercise.category.toUpperCase()}]${desc}`;
+  }).join('\n\n');
+
+  const fatNote = (ctx.fatigueScore ?? 0) >= 6
+    ? `\n\n **Fatigue elevated** — reduce weight 10–15% and focus on form today.`
+    : '';
+
+  const reply = `**${ctx.program.title}** — Week ${ctx.program.currentWeek}, Day ${ctx.program.currentDay}\n\n` +
+                `${exercisesList}\n\n` +
+                `Warm up 5–7 minutes • Rest 60–90 seconds between sets${fatNote}\n\n` +
+                `Tell me when you're done and I'll log it for you! `;
+
+  return {
+    success: true,
+    reply,
+    data: { exercises: dayEx.map(de => de.exercise), week: ctx.program.currentWeek, day: ctx.program.currentDay },
+  };
+  }
+  
 
   private programStatus(ctx: UserContext): CoachResponse {
     if (!ctx.program) return { success: true, reply: `You're not enrolled in a program. Visit Programs to start one!` };
@@ -645,43 +668,50 @@ Never invent data. "response" is always required.`;
   }
 
   private async weeklyProgram(userId: string, ctx: UserContext): Promise<CoachResponse> {
-    if (!ctx.program) return { success: true, reply: `No active program. Browse Programs to enroll.` };
-    const enrollment = await prisma.programEnrollment.findFirst({
-      where: { userId, isActive: true },
-      include: {
-        program: {
-          include: {
-            weeks: {
-              where: { weekNumber: ctx.program.currentWeek },
-              include: {
-                days: {
-                  include: {
-                    exercises: {
-                      include: { exercise: { select: { name: true } } },
-                      orderBy: { orderIndex: 'asc' },
-                    },
+  if (!ctx.program) return { success: true, reply: `No active program. Browse Programs to enroll.` };
+
+  const enrollment = await prisma.programEnrollment.findFirst({
+    where: { userId, isActive: true },
+    include: {
+      program: {
+        include: {
+          weeks: {
+            where: { weekNumber: ctx.program!.currentWeek },
+            include: {
+              days: {
+                include: {
+                  exercises: {
+                    include: { exercise: { select: { name: true } } },
+                    orderBy: { orderIndex: 'asc' },
                   },
-                  orderBy: { dayNumber: 'asc' },
                 },
+                orderBy: { dayNumber: 'asc' },
               },
             },
           },
         },
       },
-    });
-    const days = enrollment?.program.weeks[0]?.days ?? [];
-    if (!days.length) return { success: true, reply: `Couldn't load this week's schedule.` };
-    const labels = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-    const schedule = days.map((d, i) => {
-      const cur  = d.dayNumber === ctx.program!.currentDay ? ' ← TODAY' : '';
-      const exs  = d.exercises.map(de => de.exercise.name).join(', ');
-      return `${labels[i] ?? `Day ${d.dayNumber}`}: ${d.title ?? exs}${cur}`;
-    }).join('\n');
-    return {
-      success: true,
-      reply: `**${ctx.program.title}** — Week ${ctx.program.currentWeek}\n\n${schedule}\n\n${ctx.program.completedDays}/${ctx.program.totalDays} sessions complete.`,
-      data: { days },
-    };
+    },
+  });
+
+  const days = enrollment?.program.weeks[0]?.days ?? [];
+  if (!days.length) return { success: true, reply: `Couldn't load this week's schedule.` };
+
+  const schedule = days.map(d => {
+    const exs = d.exercises.map(de => de.exercise.name).join(' • ');
+    const today = d.dayNumber === ctx.program!.currentDay ? ' ← **TODAY**' : '';
+    return `**${d.dayNumber}. \( {d.title || 'Day ' + d.dayNumber}** \){today}\n   ${exs}`;
+  }).join('\n\n');
+
+  const reply = `**${ctx.program.title}** — Week ${ctx.program.currentWeek}\n\n` +
+                `${schedule}\n\n` +
+                `\( {ctx.program.completedDays}/ \){ctx.program.totalDays} sessions complete • ${ctx.program.pctComplete}% done`;
+
+  return {
+    success: true,
+    reply,
+    data: { days },
+  };
   }
 
   private workoutHistory(ctx: UserContext): CoachResponse {
