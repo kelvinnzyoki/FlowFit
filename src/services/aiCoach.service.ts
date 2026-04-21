@@ -668,7 +668,9 @@ Never invent data. "response" is always required.`;
   }
 
   private async weeklyProgram(userId: string, ctx: UserContext): Promise<CoachResponse> {
-  if (!ctx.program) return { success: true, reply: `No active program. Browse Programs to enroll.` };
+  if (!ctx.program) {
+    return { success: true, reply: `No active program. Browse Programs to enroll.` };
+  }
 
   const enrollment = await prisma.programEnrollment.findFirst({
     where: { userId, isActive: true },
@@ -695,17 +697,24 @@ Never invent data. "response" is always required.`;
   });
 
   const days = enrollment?.program.weeks[0]?.days ?? [];
-  if (!days.length) return { success: true, reply: `Couldn't load this week's schedule.` };
+  if (!days.length) {
+    return { success: true, reply: `Couldn't load this week's schedule.` };
+  }
 
-  const schedule = days.map(d => {
+  // Build clean, readable weekly schedule
+  const scheduleLines = days.map(d => {
     const exs = d.exercises.map(de => de.exercise.name).join(' • ');
-    const today = d.dayNumber === ctx.program!.currentDay ? ' ← **TODAY**' : '';
-    return `**${d.dayNumber}. \( {d.title || 'Day ' + d.dayNumber}** \){today}\n   ${exs}`;
+    const isToday = d.dayNumber === ctx.program!.currentDay;
+    const dayLabel = isToday 
+      ? `**Day ${d.dayNumber} — TODAY**` 
+      : `**Day ${d.dayNumber}**`;
+    
+    return `\( {dayLabel}\n \){exs}`;
   }).join('\n\n');
 
   const reply = `**${ctx.program.title}** — Week ${ctx.program.currentWeek}\n\n` +
-                `${schedule}\n\n` +
-                `\( {ctx.program.completedDays}/ \){ctx.program.totalDays} sessions complete • ${ctx.program.pctComplete}% done`;
+                `${scheduleLines}\n\n` +
+                ` \( {ctx.program.completedDays}/ \){ctx.program.totalDays} sessions complete • ${ctx.program.pctComplete}% done`;
 
   return {
     success: true,
@@ -713,7 +722,7 @@ Never invent data. "response" is always required.`;
     data: { days },
   };
   }
-
+  
   private workoutHistory(ctx: UserContext): CoachResponse {
     const logs = ctx.recentLogs;
     if (!logs.length) return { success: true, reply: `No sessions in the last 14 days. Ready to start? Say "give me a workout".` };
