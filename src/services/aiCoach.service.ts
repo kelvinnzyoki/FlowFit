@@ -358,7 +358,7 @@ class AICoachService {
       ageYears,
       planName:     subscription?.plan.name ?? 'Free',
       hasCoaching:  subscription?.plan.hasPersonalCoaching ?? false,
-      hasNutrition: subscription?.plan.hasNutritionTracking ?? true,
+      hasNutrition: subscription?.plan.hasNutritionTracking ?? false,
       currentStreak:   streak?.currentStreak  ?? 0,
       longestStreak:   streak?.longestStreak  ?? 0,
       lastWorkoutDate: streak?.lastWorkoutDate ? fmtDate(streak.lastWorkoutDate) : null,
