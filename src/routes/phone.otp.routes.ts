@@ -20,11 +20,11 @@ import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
 const router = Router();
 
 // ── Env ───────────────────────────────────────────────────────────────────────
-const RESEND_API_KEY  = process.env.RESEND_API_KEY!;
+const SENDMATOR_API_KEY  = process.env.SENDMATOR_API_KEY!;
 const RESEND_FROM_SMS = process.env.RESEND_FROM_SMS || 'FlowFit';  // sender name
 
-if (!RESEND_API_KEY) {
-  console.warn('[phone-otp] RESEND_API_KEY is not set — SMS delivery will fail');
+if (!SENDMATOR_API_KEY) {
+  console.warn('[phone-otp] SENDMATOR_API_KEY is not set — SMS delivery will fail');
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -58,10 +58,10 @@ async function sendSmsViaResend(to: string, code: string): Promise<void> {
     text:    `Your FlowFit verification code is ${code}. It expires in 5 minutes. Do not share this code.`,
   };
 
-  const res = await fetch('https://api.resend.com/sms', {
+  const res = await fetch('https://api.sendmator.com/v1/sms/send', {
     method:  'POST',
     headers: {
-      'Authorization': `Bearer ${RESEND_API_KEY}`,
+      'Authorization': `Bearer ${SENDMATOR_API_KEY}`,
       'Content-Type':  'application/json',
     },
     body: JSON.stringify(body),
