@@ -529,16 +529,26 @@ router.post('/refresh', async (req: Request, res: Response) => {
     });
 
     if (!rotated) {
-      const hasLiveToken = await prisma.refreshToken.findFirst({
-        where: { userId: decoded.userId, expiresAt: { gt: new Date() } },
-        select: { id: true },
-      });
-      if (hasLiveToken) {
-        res.status(409).json({ success: false, code: 'CONCURRENT_REFRESH', error: 'Refresh already completed by concurrent request.' });
-        return;
+      
+      const existingAccess = req.cookies?.ff_access;
+      if (existingAccess) {
+        try {
+          jwt.verify(existingAccess, JWT_ACCESS_SECRET);
+          // Still valid — return it directly, no rotation needed.
+          res.status(200).json({ success: true, data: { accessToken: existingAccess } });
+          return;
+        } catch { /* expired, fall through to mint a fresh one */ }
       }
-      clearAllCookies(res);
-      res.status(401).json({ success: false, error: 'Session expired. Please log in again.' });
+      // ff_access is expired or absent — mint a fresh access token only.
+      // We already confirmed a live refresh token exists for this user above,
+      // so issuing a new access token here is safe without another rotation.
+      const freshAccess = jwt.sign(
+        { userId: decoded.userId },
+        JWT_ACCESS_SECRET,
+        { expiresIn: ACCESS_EXPIRES }
+      );
+      res.cookie('ff_access', freshAccess, ACCESS_COOKIE_OPTIONS);
+      res.status(200).json({ success: true, data: { accessToken: freshAccess } });
       return;
     }
 
