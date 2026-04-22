@@ -58,7 +58,7 @@ async function sendSmsViaResend(to: string, code: string): Promise<void> {
     text:    `Your FlowFit verification code is ${code}. It expires in 5 minutes. Do not share this code.`,
   };
 
-  const res = await fetch('https://api.sendmator.com/v1/messages', {
+  const res = await fetch('https://api.sendmator.com/v1', {
     method:  'POST',
     headers: {
       'Authorization': `Bearer ${SENDMATOR_API_KEY}`,
