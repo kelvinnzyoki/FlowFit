@@ -8,6 +8,7 @@ import prisma from '../config/db.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 import phoneOtpRoutes from './phone.otp.routes.js';
+import { notifyWelcome } from '../services/notification.service.js';
 
 const router = Router();
 
@@ -172,6 +173,9 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
 
     const { accessToken, refreshToken } = generateTokens(user.id);
     await storeRefreshToken(user.id, refreshToken);
+    notifyWelcome(user.id, user.name || 'Athlete').catch(err =>
+      console.error('[auth] notifyWelcome failed:', err)
+    );
     setAllCookies(res, accessToken, refreshToken);
 
     res.status(201).json({ success: true, data: { user, accessToken } });
