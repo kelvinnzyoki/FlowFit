@@ -427,6 +427,26 @@ router.post('/logout', async (req: Request, res: Response) => {
   res.status(200).json({ success: true, message: 'Logged out successfully.' });
 });
 
+// ─── GET /api/v1/auth/session ─────────────────────────────────────────────────
+router.get('/session', async (req: Request, res: Response) => {
+  const refreshToken = req.cookies?.ff_refresh;
+  if (!refreshToken) {
+    res.json({ success: true, valid: false });
+    return;
+  }
+  try {
+    jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+    const tokenHash = hashToken(refreshToken);
+    const record = await prisma.refreshToken.findFirst({
+      where: { token: tokenHash, expiresAt: { gt: new Date() } },
+      select: { id: true },
+    });
+    res.json({ success: true, valid: !!record });
+  } catch {
+    res.json({ success: true, valid: false });
+  }
+});
+
 // ─── POST /api/v1/auth/refresh ───────────────────────────────────────────────
 router.post('/refresh', async (req: Request, res: Response) => {
   const refreshToken = req.cookies?.ff_refresh;
@@ -509,8 +529,14 @@ router.post('/refresh', async (req: Request, res: Response) => {
     });
 
     if (!rotated) {
-      // Concurrent refresh already consumed this token — clear all cookies so
-      // ff_session is gone and the client does not loop retrying the refresh.
+      const hasLiveToken = await prisma.refreshToken.findFirst({
+        where: { userId: decoded.userId, expiresAt: { gt: new Date() } },
+        select: { id: true },
+      });
+      if (hasLiveToken) {
+        res.status(409).json({ success: false, code: 'CONCURRENT_REFRESH', error: 'Refresh already completed by concurrent request.' });
+        return;
+      }
       clearAllCookies(res);
       res.status(401).json({ success: false, error: 'Session expired. Please log in again.' });
       return;
