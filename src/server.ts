@@ -113,6 +113,20 @@ if (process.env.NODE_ENV === 'development') {
 
 app.use('/api', standardLimiter);
 
+// CRITICAL: Prevent Vercel/CDN from caching any authenticated API response.
+// Without this, user A's data can be served to user B from the edge cache.
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
+
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Vary', 'Authorization, Cookie');
+  next();
+});
+
 app.use("/api/exercises", exerciseRoutes);
 
 
