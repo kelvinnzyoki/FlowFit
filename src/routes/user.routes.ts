@@ -6,6 +6,12 @@ const router = Router();
 
 router.use(authenticate);
 
+// Prevent any proxy or CDN from caching user-specific responses.
+router.use((_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, private');
+  next();
+});
+
 // ─── GET /api/v1/users/me ─────────────────────────────────────────────────────
 router.get('/me', async (req: Request, res: Response) => {
   try {
