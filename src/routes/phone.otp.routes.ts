@@ -3,10 +3,9 @@
  * POST /api/v1/auth/send-phone-otp
  * POST /api/v1/auth/verify-phone-otp
  *
- * OTP delivery:   Sendmator API (SENDMATOR_API_KEY + SENDMATOR_IDENTITY_ID) — SMS.
+ * OTP delivery:   Africa's Talking SMS API
  * Rate limiting:  3 code-verify attempts per code, 3 sends per phone per hour.
- * Carrier check:  Validates any Kenyan mobile number (Safaricom, Airtel, Telkom,
- *                 Equitel) — NOT locked to Safaricom only.
+ * Carrier check:  Validates any Kenyan mobile number (Safaricom, Airtel, Telkom, Equitel)
  * Code storage:   bcrypt-hashed 6-digit code stored in PhoneOtp table (Prisma).
  *                 Expires after 5 minutes. One-time use.
  */
@@ -20,13 +19,18 @@ import { authenticate, AuthRequest } from '../middleware/auth.middleware.js';
 const router = Router();
 
 // ── Env ───────────────────────────────────────────────────────────────────────
-// SENDMATOR_API_KEY    — secret API key (header: X-API-Key)
-// SENDMATOR_IDENTITY_ID — UUID of the SMS sender identity from Sendmator dashboard
-const SENDMATOR_API_KEY     = process.env.SENDMATOR_API_KEY     ?? '';
-const SENDMATOR_IDENTITY_ID = process.env.SENDMATOR_IDENTITY_ID ?? '';
+// AFRICASTALKING_API_KEY  — secret API key from AT dashboard
+// AFRICASTALKING_USERNAME — your AT application username (use 'sandbox' for dev)
+const AT_API_KEY  = process.env.AFRICASTALKING_API_KEY  ?? '';
+const AT_USERNAME = process.env.AFRICASTALKING_USERNAME ?? '';
 
-if (!SENDMATOR_API_KEY)     console.warn('[phone-otp] SENDMATOR_API_KEY is not set — SMS delivery will fail');
-if (!SENDMATOR_IDENTITY_ID) console.warn('[phone-otp] SENDMATOR_IDENTITY_ID is not set — SMS delivery will fail');
+if (!AT_API_KEY)  console.warn('[phone-otp] AFRICASTALKING_API_KEY is not set — SMS delivery will fail');
+if (!AT_USERNAME) console.warn('[phone-otp] AFRICASTALKING_USERNAME is not set — SMS delivery will fail');
+
+const IS_PROD       = process.env.NODE_ENV === 'production';
+const AT_SMS_URL    = IS_PROD
+  ? 'https://api.africastalking.com/version1/messaging'
+  : 'https://api.sandbox.africastalking.com/version1/messaging';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const OTP_TTL_SECONDS    = 300;  // 5 minutes
@@ -36,13 +40,15 @@ const BCRYPT_ROUNDS      = 10;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Normalise to 254XXXXXXXXX; returns null if invalid Kenyan mobile */
+/** Normalise to +254XXXXXXXXX (E.164); returns null if not a valid Kenyan mobile */
 function normaliseKenyanPhone(raw: string): string | null {
   let d = raw.replace(/\D/g, '');
-  if (d.startsWith('+')) d = d.slice(1);
-  if (d.startsWith('07') || d.startsWith('01')) d = '254' + d.slice(1);
-  // Accept all Kenyan carriers: 2547xxxxxxxx and 2541xxxxxxxx
-  if (/^254[71]\d{8}$/.test(d)) return d;
+  if (d.startsWith('0'))   d = '254' + d.slice(1);
+  if (d.startsWith('254')) d = d;
+  // Africa's Talking requires E.164 format with leading +
+  const e164 = '+' + d;
+  // Accept all Kenyan carriers: +2547xxxxxxxx and +2541xxxxxxxx
+  if (/^\+254[71]\d{8}$/.test(e164)) return e164;
   return null;
 }
 
@@ -51,38 +57,50 @@ function generateOtp(): string {
   return String(crypto.randomInt(100000, 999999));
 }
 
-/** Send SMS via Sendmator API */
-async function sendSmsViaSendmator(to: string, code: string, userId: string): Promise<void> {
-  // FIX 1: Correct endpoint — /v1/sms/send  (was /v1, a 404)
-  // FIX 2: Correct auth header — X-API-Key  (was Authorization: Bearer)
-  // FIX 3: Correct body schema              (was Resend/Twilio shape)
-  const body = {
-    recipient_type:      'contact',
-    contact_external_id: userId,               // identifier for the recipient contact
-    content:             `Your FlowFit verification code is ${code}. It expires in 5 minutes. Do not share this code.`,
-    sms_identity_id:     SENDMATOR_IDENTITY_ID, // UUID from Sendmator dashboard
-  };
+/**
+ * Send SMS via Africa's Talking API.
+ * Docs: https://developers.africastalking.com/docs/sms/sending
+ * - Header:       apiKey: <your key>
+ * - Content-Type: application/x-www-form-urlencoded
+ * - Accept:       application/json
+ * - Body fields:  username, to, message
+ */
+async function sendSmsViaAfricasTalking(to: string, code: string): Promise<void> {
+  const params = new URLSearchParams();
+  params.append('username', AT_USERNAME);
+  params.append('to',       to);
+  params.append('message',  `Your FlowFit verification code is ${code}. It expires in 5 minutes. Do not share this code.`);
 
-  const res = await fetch('https://api.sendmator.com/v1/sms/send', {
+  const res = await fetch(AT_SMS_URL, {
     method:  'POST',
     headers: {
-      'X-API-Key':     SENDMATOR_API_KEY,
-      'Content-Type':  'application/json',
+      'apiKey':        AT_API_KEY,
+      'Content-Type':  'application/x-www-form-urlencoded',
+      'Accept':        'application/json',
     },
-    body: JSON.stringify(body),
+    body: params.toString(),
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as any;
-    throw new Error(`Sendmator SMS failed (${res.status}): ${err?.message ?? 'unknown error'}`);
+    throw new Error(
+      `Africa's Talking SMS failed (${res.status}): ${err?.SMSMessageData?.Message ?? JSON.stringify(err)}`
+    );
+  }
+
+  const data = await res.json() as any;
+  const recipients: any[] = data?.SMSMessageData?.Recipients ?? [];
+
+  // AT returns 200 even on per-number failures — check the recipient status
+  const failed = recipients.filter(r => r.statusCode !== 101);
+  if (failed.length > 0) {
+    throw new Error(
+      `Africa's Talking rejected recipient: ${failed.map(r => `${r.number} — ${r.status}`).join(', ')}`
+    );
   }
 }
 
 // ── POST /api/v1/auth/send-phone-otp ─────────────────────────────────────────
-/**
- * Rate limit: max 3 OTP sends per phone per hour.
- * Invalidates any existing unused code for this phone+user before creating new one.
- */
 router.post('/send-phone-otp', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user?.id) {
@@ -102,11 +120,11 @@ router.post('/send-phone-otp', authenticate, async (req: AuthRequest, res: Respo
       });
     }
 
-    const userId = req.user.id;
-    const now    = new Date();
+    const userId     = req.user.id;
+    const now        = new Date();
     const oneHourAgo = new Date(now.getTime() - 3_600_000);
 
-    // ── Rate limit: count sends in the last hour for this phone ──────────────
+    // ── Rate limit: max sends per hour for this phone ─────────────────────────
     const recentSends = await prisma.phoneOtp.count({
       where: {
         phone,
@@ -116,13 +134,13 @@ router.post('/send-phone-otp', authenticate, async (req: AuthRequest, res: Respo
 
     if (recentSends >= MAX_SENDS_PER_HOUR) {
       return res.status(429).json({
-        success:   false,
-        message:   `Too many verification requests. You can request a new code up to ${MAX_SENDS_PER_HOUR} times per hour. Please wait before trying again.`,
+        success:    false,
+        message:    `Too many verification requests. You can request a new code up to ${MAX_SENDS_PER_HOUR} times per hour. Please wait before trying again.`,
         retryAfter: 3600,
       });
     }
 
-    // ── Void any live code for this user+phone ────────────────────────────────
+    // ── Void any live code for this user+phone before issuing a new one ───────
     await prisma.phoneOtp.updateMany({
       where: {
         userId,
@@ -130,7 +148,7 @@ router.post('/send-phone-otp', authenticate, async (req: AuthRequest, res: Respo
         usedAt:    null,
         expiresAt: { gt: now },
       },
-      data: { usedAt: now },   // mark as used = invalidated
+      data: { usedAt: now },
     });
 
     // ── Generate, hash, and persist new code ─────────────────────────────────
@@ -149,13 +167,13 @@ router.post('/send-phone-otp', authenticate, async (req: AuthRequest, res: Respo
     });
 
     // ── Send SMS ──────────────────────────────────────────────────────────────
-    await sendSmsViaSendmator(phone, code, userId);
+    await sendSmsViaAfricasTalking(phone, code);
 
-    console.log(`[phone-otp] Code sent to ${phone.slice(0, 7)}***${phone.slice(-2)} for user ${userId}`);
+    console.log(`[phone-otp] Code sent to ${phone.slice(0, 6)}***${phone.slice(-2)} for user ${userId}`);
 
     return res.json({
       success:   true,
-      message:   `Verification code sent to ${phone.slice(0, 7)}*****`,
+      message:   `Verification code sent to ${phone.slice(0, 6)}*****`,
       expiresIn: OTP_TTL_SECONDS,
     });
 
@@ -166,10 +184,6 @@ router.post('/send-phone-otp', authenticate, async (req: AuthRequest, res: Respo
 });
 
 // ── POST /api/v1/auth/verify-phone-otp ───────────────────────────────────────
-/**
- * Rate limit: max 3 wrong attempts per code before it is voided.
- * On success: marks code as used, sets user.mpesaPhone + user.phoneVerified.
- */
 router.post('/verify-phone-otp', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user?.id) {
@@ -214,11 +228,10 @@ router.post('/verify-phone-otp', authenticate, async (req: AuthRequest, res: Res
 
     // ── Attempt-count rate limit ──────────────────────────────────────────────
     if (otp.attempts >= MAX_VERIFY_TRIES) {
-      // Void the code
       await prisma.phoneOtp.update({ where: { id: otp.id }, data: { usedAt: now } });
       return res.status(429).json({
-        success: false,
-        message: 'Too many incorrect attempts. Please request a new verification code.',
+        success:    false,
+        message:    'Too many incorrect attempts. Please request a new verification code.',
         retryAfter: 0,
       });
     }
@@ -227,7 +240,6 @@ router.post('/verify-phone-otp', authenticate, async (req: AuthRequest, res: Res
     const match = await bcrypt.compare(String(code).trim(), otp.codeHash);
 
     if (!match) {
-      // Increment attempts
       const newAttempts = otp.attempts + 1;
       const voidCode    = newAttempts >= MAX_VERIFY_TRIES;
 
@@ -270,7 +282,7 @@ router.post('/verify-phone-otp', authenticate, async (req: AuthRequest, res: Res
       }),
     ]);
 
-    console.log(`[phone-otp] Phone ${phone.slice(0, 7)}***${phone.slice(-2)} verified for user ${userId}`);
+    console.log(`[phone-otp] Phone ${phone.slice(0, 6)}***${phone.slice(-2)} verified for user ${userId}`);
 
     return res.json({
       success:       true,
