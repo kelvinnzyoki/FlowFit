@@ -176,8 +176,8 @@ app.get('/', (req: Request, res: Response) => {
 // API ROUTES
 // ============================================
 
-app.use('/api/v1', routes);
-app.use('/api/v1/auth', authRoutes);
+//app.use('/api/v1', routes);
+app.use('/api/v1/auth', routes);
 
 app.use('/api/v1/ai', aiRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
