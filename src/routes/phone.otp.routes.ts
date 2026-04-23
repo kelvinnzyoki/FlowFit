@@ -28,9 +28,9 @@ if (!AT_API_KEY)  console.warn('[phone-otp] AFRICASTALKING_API_KEY is not set �
 if (!AT_USERNAME) console.warn('[phone-otp] AFRICASTALKING_USERNAME is not set — SMS delivery will fail');
 
 const IS_PROD       = process.env.NODE_ENV === 'production';
-const AT_SMS_URL    = IS_PROD
-  ? 'https://api.africastalking.com/version1/messaging'
-  : 'https://api.sandbox.africastalking.com/version1/messaging';
+const AT_SMS_URL = process.env.AT_SANDBOX === 'true'
+  ? 'https://api.sandbox.africastalking.com/version1/messaging'
+  : 'https://api.africastalking.com/version1/messaging';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const OTP_TTL_SECONDS    = 300;  // 5 minutes
