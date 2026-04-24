@@ -98,8 +98,9 @@ async function sendSmsViaAfricasTalking(to: string, code: string): Promise<void>
   const data = await res.json() as any;
   const recipients: any[] = data?.SMSMessageData?.Recipients ?? [];
 
-  // AT returns 200 even on per-number failures — check the recipient status
-  const failed = recipients.filter(r => r.statusCode !== 101);
+
+const AT_SUCCESS_CODES = new Set([100, 101, 102]);
+const failed = recipients.filter(r => !AT_SUCCESS_CODES.has(Number(r.statusCode)));
   if (failed.length > 0) {
     throw new Error(
       `Africa's Talking rejected recipient: ${failed.map(r => `${r.number} — ${r.status}`).join(', ')}`
