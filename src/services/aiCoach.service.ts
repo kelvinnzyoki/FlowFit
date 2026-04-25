@@ -35,7 +35,11 @@ type ToolName =
   | 'achievements'
   | 'streak_info'
   | 'recovery_plan'
-  | 'log_workout';
+  | 'log_workout'
+  | 'nutrition_plan'
+  | 'macro_calculator'
+  | 'log_meal'
+  | 'nutrition_summary';
 
 interface ConversationMemory {
   adherenceScore?: number;
@@ -69,6 +73,7 @@ interface UserContext {
     totalDays:      number;
     pctComplete:    number;
     nextExercises:  string[];
+    
   };
   recentLogs: {
     date:      string;
@@ -97,6 +102,18 @@ interface UserContext {
   recentAchievement?:   string;
   nextAchievementHint?: string;
   fatigueScore?:        number;
+  dailyCalorieTarget?:  number;
+  dailyProteinTarget?:  number;
+  dailyCarbTarget?:     number;
+  dailyFatTarget?:      number;
+  todayNutrition?: {
+    calories:  number;
+    protein:   number;
+    carbs:     number;
+    fat:       number;
+    meals:     number;
+  };
+  nutritionAdherence7d?: number; // % of days this week user logged meals
 }
 
 interface GroqChatResponse {
@@ -111,6 +128,7 @@ const LLMResponseSchema = z.object({
       'weekly_program', 'workout_history', 'adaptive_adjustment',
       'body_metrics', 'achievements', 'streak_info',
       'recovery_plan', 'log_workout',
+      'nutrition_plan', 'macro_calculator', 'log_meal', 'nutrition_summary',
     ]),
     args: z.any().optional(),
   }).optional(),
@@ -213,10 +231,15 @@ class AICoachService {
 
   // BUILD RICH USER CONTEXT — all queries in parallel
   private async buildUserContext(userId: string): Promise<UserContext> {
+
+    const today     = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
     const [
       profile, subscription, enrollment,
       recentLogs, thisWeekLogs, lastWeekLogs,
       metrics, oldMetric, achievements, streak,
+      todayMeals, weekMeals,
     ] = await Promise.all([
       prisma.profile.findUnique({
         where: { userId },
@@ -291,6 +314,18 @@ class AICoachService {
       }),
 
       prisma.streak.findUnique({ where: { userId } }),
+
+      // Nutrition — today's meals
+      prisma.nutritionLog.findMany({
+        where: { userId, date: { gte: todayStart } },
+        select: { calories: true, protein: true, carbs: true, fat: true },
+      }).catch(() => [] as any[]),
+
+      // Nutrition — this week's logs for adherence calculation
+      prisma.nutritionLog.findMany({
+        where: { userId, date: { gte: weeksAgo(1) } },
+        select: { date: true },
+      }).catch(() => [] as any[]),
     ]);
 
     // Identity
@@ -347,6 +382,46 @@ class AICoachService {
       select: { name: true, description: true },
     }).catch(() => null);
 
+    // ── Nutrition ────────────────────────────────────────────────────────────
+    const weight   = profile?.weight ?? 75;
+    const height   = profile?.height ?? 175;
+    const age      = typeof ageYears !== 'undefined' ? ageYears : 30;
+    const isMale   = (profile?.gender ?? '').toLowerCase() !== 'female';
+    const goal     = (profile?.fitnessGoal ?? '').toLowerCase();
+
+    // Mifflin-St Jeor BMR → TDEE (moderate activity 1.55)
+    const bmr  = isMale
+      ? 10 * weight + 6.25 * height - 5 * age + 5
+      : 10 * weight + 6.25 * height - 5 * age - 161;
+    const tdee = Math.round(bmr * 1.55);
+
+    // Goal-based calorie target
+    const calTarget = goal.includes('loss') || goal.includes('cut')
+      ? Math.round(tdee * 0.82)   // ~18% deficit
+      : goal.includes('muscle') || goal.includes('gain') || goal.includes('bulk')
+      ? Math.round(tdee * 1.12)   // ~12% surplus
+      : tdee;                     // maintenance
+
+    // Macro split (g): protein 2g/kg, fat 25% of cals, carbs remainder
+    const proteinTarget = Math.round(weight * 2);
+    const fatTarget     = Math.round((calTarget * 0.25) / 9);
+    const carbTarget    = Math.round((calTarget - proteinTarget * 4 - fatTarget * 9) / 4);
+
+    // Today's totals from logs
+    const todayNutrition = todayMeals.length ? {
+      calories: Math.round(todayMeals.reduce((s: number, m: any) => s + (m.calories ?? 0), 0)),
+      protein:  Math.round(todayMeals.reduce((s: number, m: any) => s + (m.protein  ?? 0), 0)),
+      carbs:    Math.round(todayMeals.reduce((s: number, m: any) => s + (m.carbs    ?? 0), 0)),
+      fat:      Math.round(todayMeals.reduce((s: number, m: any) => s + (m.fat      ?? 0), 0)),
+      meals:    todayMeals.length,
+    } : undefined;
+
+    // Nutrition adherence — unique days this week with at least one log
+    const uniqueNutritionDays = new Set(
+      weekMeals.map((m: any) => new Date(m.date).toDateString())
+    ).size;
+    const nutritionAdherence7d = Math.round((uniqueNutritionDays / 7) * 100);
+
     return {
       name,
       fitnessGoal:  profile?.fitnessGoal  ?? 'general fitness',
@@ -368,6 +443,12 @@ class AICoachService {
       totalAchievements: achievements.length, totalPoints,
       recentAchievement: achievements[0]?.achievement.name,
       nextAchievementHint: nextAch ? `${nextAch.name}: ${nextAch.description}` : undefined,
+      dailyCalorieTarget:  calTarget,
+      dailyProteinTarget:  proteinTarget,
+      dailyCarbTarget:     carbTarget,
+      dailyFatTarget:      fatTarget,
+      todayNutrition,
+      nutritionAdherence7d,
     };
   }
 
@@ -415,6 +496,21 @@ class AICoachService {
     if (ctx.nextAchievementHint)  lines.push(`  Next: "${ctx.nextAchievementHint}"`);
     lines.push('');
     lines.push(`MEMORY: Adherence ${memory.adherenceScore ?? 80}/100 | Fatigue ${memory.fatigueScore ?? 0}/10 | Msg #${memory.messageCount ?? 1}`);
+    // Nutrition section
+    lines.push('');
+    lines.push(`NUTRITION TARGETS: ${ctx.dailyCalorieTarget} kcal | P:${ctx.dailyProteinTarget}g C:${ctx.dailyCarbTarget}g F:${ctx.dailyFatTarget}g`);
+    if (ctx.todayNutrition) {
+      const n  = ctx.todayNutrition;
+      const pct = ctx.dailyCalorieTarget ? Math.round((n.calories / ctx.dailyCalorieTarget) * 100) : 0;
+      lines.push(`TODAY'S INTAKE (${n.meals} meals): ${n.calories} kcal (${pct}%) | P:${n.protein}g C:${n.carbs}g F:${n.fat}g`);
+      const proteinGap = (ctx.dailyProteinTarget ?? 0) - n.protein;
+      if (proteinGap > 20) lines.push(`  ⚠ PROTEIN GAP: ${proteinGap}g still needed today`);
+    } else {
+      lines.push(`TODAY'S INTAKE: No meals logged yet`);
+    }
+    if (ctx.nutritionAdherence7d !== undefined) {
+      lines.push(`NUTRITION ADHERENCE (7d): ${ctx.nutritionAdherence7d}%`);
+    }
     lines.push('=== END CONTEXT ===');
     return lines.join('\n');
   }
@@ -424,36 +520,80 @@ class AICoachService {
     message: string, ctx: UserContext, memory: ConversationMemory, similar: string[],
   ): Promise<LLMStructured> {
     const contextBlock = this.formatContextBlock(ctx, memory);
-    const systemPrompt = `You are FlowFit's AI coach — data-driven, direct, and specific. Use the athlete's REAL data.
 
-PRINCIPLES:
-- Reference real numbers: program name, exercise names, streak count, volume %
-- Tone: honest training partner, never sycophantic
-- Fatigue > 6: steer toward recovery
-- Adherence < 60: prioritise consistency over intensity
-- Coaching: ${ctx.hasCoaching} | Nutrition: ${ctx.hasNutrition}
+    // Compute TDEE and fatigue context strings for the prompt
+    const fatigue    = memory.fatigueScore ?? 0;
+    const adherence  = memory.adherenceScore ?? 80;
+    const inDeficit  = ctx.dailyCalorieTarget < (ctx.weight ?? 75) * 10 * 1.55 * 0.95;
+    const proteinShort = ctx.todayNutrition
+      ? (ctx.dailyProteinTarget ?? 0) - ctx.todayNutrition.protein > 20 : false;
 
-RESPONSE LENGTH — CRITICAL:
-- "response" = 1 to 3 SHORT sentences only. Hard limit: 60 words.
-- No long paragraphs. No bullet lists inside "response".
-- If detail is needed, use a tool — keep "response" punchy.
+    const systemPrompt = `You are FlowFit AI Coach — a world-class hybrid of an elite strength & conditioning coach, registered sports dietitian, and performance psychologist. You have full access to the athlete's real-time data below and MUST use it in every response.
 
-OUTPUT — valid JSON only, no markdown, no extra keys:
+━━ REASONING PROTOCOL (execute silently before every reply) ━━
+1. ASSESS: What is the athlete's current state? (fatigue ${fatigue}/10, adherence ${adherence}/100, goal: ${ctx.fitnessGoal})
+2. IDENTIFY: What is the single most important thing for this athlete RIGHT NOW?
+3. CONNECT: Link your response directly to their real numbers (streak, volume %, metrics, macros).
+4. PRESCRIBE: Give one specific, actionable recommendation — not generic advice.
+5. ANTICIPATE: What will they need to hear next? Seed it briefly.
+
+━━ COACHING INTELLIGENCE RULES ━━
+FATIGUE LOGIC:
+- Fatigue 0-3 → push intensity, progressive overload, add sets or load
+- Fatigue 4-6 → maintain load, emphasise technique and mind-muscle connection
+- Fatigue 7-8 → mandatory deload: -40% load, -50% volume, active recovery
+- Fatigue 9-10 → full rest, sleep audit, nutrition check
+
+PERIODISATION AWARENESS:
+- If volume ↑ >20% for 2+ weeks → flag overreaching risk proactively
+- If streak >21 days with no deload mentioned → recommend strategic rest week
+- Match intensity prescription to program week (early weeks: technique, later weeks: peak load)
+
+NUTRITION × TRAINING INTEGRATION:
+- Pre-workout (1-2h before): 30-40g carbs + 20g protein → name specific foods
+- Post-workout (within 45 min): 40-50g protein + fast carbs → name specific foods
+- ${inDeficit ? 'DEFICIT DETECTED: Preserve muscle — protein floor is ' + (ctx.dailyProteinTarget ?? 140) + 'g/day. Time carbs around workouts.' : 'SURPLUS/MAINTENANCE: Fuel performance. Carbs are your friend on training days.'}
+- ${proteinShort ? 'PROTEIN ALERT: Athlete is short on protein today — recommend a high-protein food immediately.' : ''}
+- Hydration: 35 ml/kg = ${Math.round((ctx.weight ?? 75) * 35)} ml/day for this athlete
+
+BIOMECHANICS & EXERCISE SCIENCE:
+- Reference RPE (Rate of Perceived Exertion 1-10) when prescribing intensity
+- Apply progressive overload: 2.5% weight or 1 rep increase per session when RPE < 8
+- Compound-first sequencing: squats/deads/press before isolation work
+- Tempo prescription when correcting form: 3-1-2 (eccentric-pause-concentric)
+
+KENYAN ATHLETE CONTEXT:
+- Default foods: ugali, sukuma wiki, githeri, nyama choma, eggs, milk, beans, avocado
+- Suggest locally available protein sources when giving meal advice
+- Be aware of typical Kenyan meal patterns (2-3 main meals, chai culture)
+
+PSYCHOLOGICAL COACHING:
+- Adherence <60: focus entirely on habit, remove friction, celebrate any win
+- Adherence 60-80: build momentum with small progressive challenges
+- Adherence >80: push performance, set records, introduce periodisation
+- Never shame missed sessions — reframe as data
+- Use the athlete's name (${ctx.name}) naturally but not every message
+
+━━ RESPONSE FORMAT — NON-NEGOTIABLE ━━
+- "response" field: 1–3 sentences MAX, 60 words hard limit, punchy and direct
+- Use tools for ALL detailed output (plans, history, metrics, nutrition breakdowns)
+- Never put bullet lists or headers inside "response" — that goes in tool output
+- Omit "tool" key entirely when no tool is needed
+
+OUTPUT — valid JSON only, no markdown, no code fences:
 {
-  "intent": "<what user wants>",
+  "intent": "<what athlete needs>",
   "tool": { "name": "<tool_name>", "args": {} },
-  "response": "<1-3 sentences, max 60 words>"
+  "response": "<1-3 punchy sentences max 60 words>"
 }
 
-IMPORTANT: Omit "tool" entirely when no tool is needed. NEVER return "tool": {} with no name.
+Available tools:
+  TRAINING: generate_workout | next_workout | program_status | weekly_program
+            workout_history | adaptive_adjustment | body_metrics | achievements
+            streak_info | recovery_plan | log_workout
+  NUTRITION: nutrition_plan | macro_calculator | log_meal | nutrition_summary
 
-Available tools (use only when relevant):
-  generate_workout | next_workout | program_status | weekly_program
-  workout_history  | adaptive_adjustment | body_metrics | achievements
-  streak_info      | recovery_plan       | log_workout
-
-Never invent data. "response" is always required.`;
-
+Never invent data. Always reference real numbers from context. "response" is always required.`;
     const userContent =
       contextBlock + '\n\n' +
       (similar.length ? `RELATED PAST MSGS:\n${similar.join('\n')}\n\n` : '') +
@@ -463,7 +603,7 @@ Never invent data. "response" is always required.`;
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` },
       body: JSON.stringify({
-        model: GROQ_MODEL, temperature: 0.4, max_completion_tokens: 400,
+        model: GROQ_MODEL, temperature: 0.25, max_completion_tokens: 700,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: systemPrompt },
@@ -520,6 +660,10 @@ Never invent data. "response" is always required.`;
       case 'streak_info':         return this.streakSummary(ctx);
       case 'recovery_plan':       return this.recoveryPlan(ctx);
       case 'log_workout':         return this.logWorkout(userId, tool.args);
+      case 'nutrition_plan':    return this.nutritionPlan(ctx);
+      case 'macro_calculator':  return this.macroCalculator(ctx);
+      case 'log_meal':          return this.logMeal(userId, tool.args);
+      case 'nutrition_summary': return this.nutritionSummary(userId, ctx);
       default: return { success: false, reply: 'That feature is coming soon.' };
     }
   }
@@ -849,6 +993,267 @@ Never invent data. "response" is always required.`;
     };
   }
 
+  // ── NUTRITION TOOLS ────────────────────────────────────────────────────────
+
+  private nutritionPlan(ctx: UserContext): CoachResponse {
+    const goal   = (ctx.fitnessGoal ?? '').toLowerCase();
+    const weight = ctx.weight ?? 75;
+    const cal    = ctx.dailyCalorieTarget ?? 2000;
+    const pro    = ctx.dailyProteinTarget ?? 140;
+    const carb   = ctx.dailyCarbTarget   ?? 200;
+    const fat    = ctx.dailyFatTarget    ?? 55;
+
+    const isLoss = goal.includes('loss') || goal.includes('cut');
+    const isGain = goal.includes('muscle') || goal.includes('gain') || goal.includes('bulk');
+
+    // Meal timing based on workout presence
+    const hasWorkoutToday = ctx.recentLogs.some(l =>
+      l.date === new Date().toLocaleDateString('en-KE', { weekday: 'short', month: 'short', day: 'numeric' }) && !l.skipped
+    );
+
+    const meals = [
+      {
+        name:  'Breakfast (7–8 AM)',
+        foods: isGain
+          ? '4 eggs scrambled + 2 slices bread + 1 cup milk + 1 banana'
+          : isLoss
+          ? '3 eggs boiled + sukuma wiki + black tea (no sugar)'
+          : '3 eggs + 2 slices bread + 1 avocado + chai',
+        macros: isGain ? '~520 kcal | P:32g C:45g F:18g' : isLoss ? '~280 kcal | P:22g C:8g F:16g' : '~420 kcal | P:24g C:36g F:18g',
+      },
+      {
+        name:  hasWorkoutToday ? 'Pre-Workout (1–2h before training)' : 'Mid-Morning Snack',
+        foods: hasWorkoutToday
+          ? '1 cup githeri + 1 banana + 250 ml water'
+          : '1 cup milk + 1 handful groundnuts',
+        macros: hasWorkoutToday ? '~380 kcal | P:14g C:62g F:6g' : '~220 kcal | P:10g C:12g F:14g',
+      },
+      {
+        name:  'Lunch (1–2 PM)',
+        foods: isGain
+          ? 'Ugali (4 pieces) + beef stew 150g + sukuma wiki + avocado'
+          : isLoss
+          ? 'Brown rice 1 cup + grilled chicken 120g + cucumber + tomato salad'
+          : 'Ugali (2 pieces) + chicken 100g + mixed vegetables',
+        macros: isGain ? '~780 kcal | P:42g C:88g F:22g' : isLoss ? '~420 kcal | P:35g C:48g F:8g' : '~580 kcal | P:32g C:68g F:14g',
+      },
+      {
+        name:  hasWorkoutToday ? 'Post-Workout (within 45 min)' : 'Afternoon Snack',
+        foods: hasWorkoutToday
+          ? '2 boiled eggs + 1 cup milk + 1 banana — prioritise within 45 min of session'
+          : '1 cup yoghurt + fruit',
+        macros: hasWorkoutToday ? '~320 kcal | P:24g C:34g F:10g' : '~180 kcal | P:8g C:28g F:4g',
+      },
+      {
+        name:  'Dinner (7–8 PM)',
+        foods: isGain
+          ? 'Rice 1.5 cups + lentils 1 cup + beef 100g + avocado'
+          : isLoss
+          ? 'Sukuma wiki + 2 eggs + 1 cup beans (no ugali) + lemon water'
+          : 'Ugali (2 pieces) + fish 100g + sukuma wiki',
+        macros: isGain ? '~680 kcal | P:38g C:82g F:18g' : isLoss ? '~340 kcal | P:28g C:32g F:10g' : '~480 kcal | P:28g C:56g F:12g',
+      },
+    ];
+
+    const mealLines = meals.map(m => `**${m.name}**\n${m.foods}\n_${m.macros}_`).join('\n\n');
+
+    const hydration = Math.round(weight * 35);
+    const tips = isLoss
+      ? '• Eat protein first at every meal to hit your floor\n• Avoid liquid calories — water, black tea only\n• Sleep 7–9 hrs — cortisol spikes destroy fat loss'
+      : isGain
+      ? '• Never skip a meal — surplus requires consistency\n• Add groundnuts or avocado to boost calories without volume\n• Eat within 30 min of waking'
+      : '• Time carbs around workouts for best performance\n• Aim for protein at every meal\n• Consistent meal times improve adherence';
+
+    return {
+      success: true,
+      reply: `**Personalised Nutrition Plan — ${ctx.fitnessGoal.toUpperCase()}**\n\n` +
+        `**Daily Targets:** ${cal} kcal | Protein: ${pro}g | Carbs: ${carb}g | Fat: ${fat}g\n` +
+        `**Hydration:** ${hydration} ml/day (${Math.round(hydration/250)} glasses)\n\n` +
+        mealLines + '\n\n' +
+        `**Key Rules:**\n${tips}`,
+      data: { targets: { calories: cal, protein: pro, carbs: carb, fat }, meals },
+    };
+  }
+
+  private macroCalculator(ctx: UserContext): CoachResponse {
+    const weight = ctx.weight ?? 75;
+    const height = ctx.height ?? 175;
+    const age    = ctx.ageYears ?? 30;
+    const isMale = (ctx.gender ?? '').toLowerCase() !== 'female';
+    const goal   = (ctx.fitnessGoal ?? '').toLowerCase();
+
+    // Mifflin-St Jeor BMR
+    const bmr = isMale
+      ? 10 * weight + 6.25 * height - 5 * age + 5
+      : 10 * weight + 6.25 * height - 5 * age - 161;
+
+    const activityMultipliers = {
+      sedentary:     1.2,
+      light:         1.375,
+      moderate:      1.55,
+      active:        1.725,
+      veryActive:    1.9,
+    };
+    // Infer activity from streak and volume
+    const streak = ctx.currentStreak ?? 0;
+    const mult = streak >= 5 ? activityMultipliers.active
+      : streak >= 3 ? activityMultipliers.moderate
+      : activityMultipliers.light;
+
+    const tdee = Math.round(bmr * mult);
+    const deficit  = Math.round(tdee * 0.82);
+    const surplus  = Math.round(tdee * 1.12);
+    const maintain = tdee;
+
+    const recommended = goal.includes('loss') || goal.includes('cut') ? deficit
+      : goal.includes('muscle') || goal.includes('gain') ? surplus
+      : maintain;
+
+    const proteinG = Math.round(weight * 2);
+    const fatG     = Math.round((recommended * 0.25) / 9);
+    const carbG    = Math.round((recommended - proteinG * 4 - fatG * 9) / 4);
+
+    const weeklyChange = goal.includes('loss') ? `~${Math.round((tdee - recommended) * 7 / 7700 * 10) / 10} kg/week loss`
+      : goal.includes('gain') ? `~${Math.round((recommended - tdee) * 7 / 7700 * 10) / 10} kg/week gain`
+      : 'Weight maintenance';
+
+    return {
+      success: true,
+      reply: `**Macro Calculator — ${ctx.name}**\n\n` +
+        `**Stats:** ${weight} kg | ${height} cm | ${age} yrs | ${isMale ? 'Male' : 'Female'}\n\n` +
+        `**BMR:** ${Math.round(bmr)} kcal | **TDEE (${streak >= 5 ? 'Active' : streak >= 3 ? 'Moderate' : 'Light'}):** ${tdee} kcal\n\n` +
+        `| Scenario | Calories | Protein | Carbs | Fat |\n` +
+        `|---|---|---|---|---|\n` +
+        `| Cut (−18%) | ${deficit} | ${proteinG}g | ${Math.round((deficit - proteinG*4 - Math.round(deficit*0.25/9)*9)/4)}g | ${Math.round(deficit*0.25/9)}g |\n` +
+        `| **Maintain** | **${maintain}** | **${proteinG}g** | **${Math.round((maintain - proteinG*4 - Math.round(maintain*0.25/9)*9)/4)}g** | **${Math.round(maintain*0.25/9)}g** |\n` +
+        `| Bulk (+12%) | ${surplus} | ${proteinG}g | ${Math.round((surplus - proteinG*4 - Math.round(surplus*0.25/9)*9)/4)}g | ${Math.round(surplus*0.25/9)}g |\n\n` +
+        `**Your target (${ctx.fitnessGoal}):** ${recommended} kcal → ${weeklyChange}\n` +
+        `**Set macros:** ${proteinG}g protein · ${carbG}g carbs · ${fatG}g fat`,
+      data: { bmr: Math.round(bmr), tdee, recommended, macros: { protein: proteinG, carbs: carbG, fat: fatG } },
+    };
+  }
+
+  private async logMeal(userId: string, args: any): Promise<CoachResponse> {
+    const {
+      mealName   = 'Meal',
+      calories   = null,
+      protein    = null,
+      carbs      = null,
+      fat        = null,
+      mealType   = 'OTHER', // BREAKFAST | LUNCH | DINNER | SNACK | PRE_WORKOUT | POST_WORKOUT
+    } = args ?? {};
+
+    if (!calories && !protein) {
+      return {
+        success: false,
+        reply: `Tell me more — e.g. "log 3 eggs and ugali: 480 calories, 28g protein". I need at least calories or protein to log.`,
+      };
+    }
+
+    try {
+      await (prisma as any).nutritionLog.create({
+        data: {
+          userId,
+          name:     mealName,
+          calories: calories ? parseFloat(calories) : null,
+          protein:  protein  ? parseFloat(protein)  : null,
+          carbs:    carbs    ? parseFloat(carbs)    : null,
+          fat:      fat      ? parseFloat(fat)      : null,
+          mealType: mealType.toUpperCase(),
+          date:     new Date(),
+        },
+      });
+
+      const parts = [
+        calories ? `${Math.round(calories)} kcal` : null,
+        protein  ? `${Math.round(protein)}g protein` : null,
+        carbs    ? `${Math.round(carbs)}g carbs` : null,
+        fat      ? `${Math.round(fat)}g fat` : null,
+      ].filter(Boolean).join(' · ');
+
+      return {
+        success: true,
+        reply: `✅ **${mealName}** logged — ${parts}. Every meal tracked is a step closer to your goal.`,
+      };
+    } catch (err: any) {
+      console.error('[AICoach] logMeal error:', err?.message);
+      return { success: false, reply: `Couldn't log the meal right now. Try again or use the Nutrition page directly.` };
+    }
+  }
+
+  private async nutritionSummary(userId: string, ctx: UserContext): Promise<CoachResponse> {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    let logs: any[] = [];
+    try {
+      logs = await (prisma as any).nutritionLog.findMany({
+        where:   { userId, date: { gte: todayStart } },
+        orderBy: { date: 'asc' },
+      });
+    } catch {
+      return { success: true, reply: `No nutrition logs found. Say "log my breakfast" to start tracking your food.` };
+    }
+
+    if (!logs.length) {
+      const proteinTarget = ctx.dailyProteinTarget ?? 140;
+      return {
+        success: true,
+        reply: `No meals logged yet today. Your targets: **${ctx.dailyCalorieTarget} kcal** | **${proteinTarget}g protein** | ${ctx.dailyCarbTarget}g carbs | ${ctx.dailyFatTarget}g fat.\n\nStart by logging breakfast — say "log 3 eggs and chai: 320 calories, 22g protein".`,
+      };
+    }
+
+    const totals = logs.reduce((s: any, m: any) => ({
+      calories: s.calories + (m.calories ?? 0),
+      protein:  s.protein  + (m.protein  ?? 0),
+      carbs:    s.carbs    + (m.carbs    ?? 0),
+      fat:      s.fat      + (m.fat      ?? 0),
+    }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+
+    const calTarget  = ctx.dailyCalorieTarget ?? 2000;
+    const proTarget  = ctx.dailyProteinTarget ?? 140;
+    const carbTarget = ctx.dailyCarbTarget    ?? 200;
+    const fatTarget  = ctx.dailyFatTarget     ?? 55;
+
+    const calRemain  = calTarget  - Math.round(totals.calories);
+    const proRemain  = proTarget  - Math.round(totals.protein);
+    const carbRemain = carbTarget - Math.round(totals.carbs);
+    const fatRemain  = fatTarget  - Math.round(totals.fat);
+
+    const calPct  = Math.min(Math.round((totals.calories / calTarget)  * 100), 100);
+    const proPct  = Math.min(Math.round((totals.protein  / proTarget)  * 100), 100);
+
+    const mealLines = logs.map((m: any) => {
+      const parts = [
+        m.calories ? `${Math.round(m.calories)} kcal` : null,
+        m.protein  ? `P:${Math.round(m.protein)}g`    : null,
+        m.carbs    ? `C:${Math.round(m.carbs)}g`      : null,
+        m.fat      ? `F:${Math.round(m.fat)}g`        : null,
+      ].filter(Boolean).join(' | ');
+      const type = m.mealType ? `[${m.mealType}] ` : '';
+      return `• ${type}**${m.name}** — ${parts}`;
+    }).join('\n');
+
+    const proteinAlert = proRemain > 30
+      ? `\n\n⚠️ **Protein gap: ${proRemain}g remaining** — add eggs, milk, or beans to your next meal.`
+      : proRemain <= 0 ? `\n\n✅ Protein target hit!` : '';
+
+    const calorieStatus = calRemain < 0
+      ? `\n\n🔴 Over by ${Math.abs(calRemain)} kcal — adjust dinner or skip evening snack.`
+      : calRemain < 200 ? `\n\n✅ Nearly at calorie target.`
+      : `\n\n${calRemain} kcal remaining for today.`;
+
+    return {
+      success: true,
+      reply: `**Today's Nutrition (${logs.length} meal${logs.length !== 1 ? 's' : ''} logged)**\n\n` +
+        mealLines + '\n\n' +
+        `**Totals:** ${Math.round(totals.calories)} / ${calTarget} kcal (${calPct}%) | P: ${Math.round(totals.protein)} / ${proTarget}g (${proPct}%)\n` +
+        `Carbs: ${Math.round(totals.carbs)} / ${carbTarget}g | Fat: ${Math.round(totals.fat)} / ${fatTarget}g` +
+        proteinAlert + calorieStatus +
+        (ctx.nutritionAdherence7d !== undefined ? `\n\n📊 7-day logging adherence: **${ctx.nutritionAdherence7d}%**` : ''),
+      data: { totals: Object.fromEntries(Object.entries(totals).map(([k,v]) => [k, Math.round(v as number)])), remaining: { calories: calRemain, protein: proRemain, carbs: carbRemain, fat: fatRemain } },
+    };
+        }
   // EMBEDDINGS
   private generateEmbedding(text: string): number[] {
     const v = new Array<number>(EMBED_DIMS).fill(0);
