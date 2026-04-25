@@ -315,17 +315,21 @@ class AICoachService {
 
       prisma.streak.findUnique({ where: { userId } }),
 
-      // Nutrition — today's meals
-      (prisma as any).nutritionLog.findMany({
-        where: { userId, date: { gte: todayStart } },
-        select: { calories: true, protein: true, carbs: true, fat: true },
-      }).catch(() => [] as any[]),
+      // Nutrition — today's meals (safe: model may not exist in schema yet)
+      Promise.resolve().then(() =>
+        (prisma as any).nutritionLog?.findMany({
+          where: { userId, date: { gte: todayStart } },
+          select: { calories: true, protein: true, carbs: true, fat: true },
+        }) ?? []
+      ).catch(() => [] as any[]),
 
       // Nutrition — this week's logs for adherence calculation
-      (prisma as any).nutritionLog.findMany({
-        where: { userId, date: { gte: weeksAgo(1) } },
-        select: { date: true },
-      }).catch(() => [] as any[]),
+      Promise.resolve().then(() =>
+        (prisma as any).nutritionLog?.findMany({
+          where: { userId, date: { gte: weeksAgo(1) } },
+          select: { date: true },
+        }) ?? []
+      ).catch(() => [] as any[]),
     ]);
 
     // Identity
@@ -1151,7 +1155,11 @@ Never invent data. Always reference real numbers from context. "response" is alw
     }
 
     try {
-      await (prisma as any).nutritionLog.create({
+      const nutritionLog = (prisma as any).nutritionLog;
+      if (!nutritionLog) {
+        return { success: false, reply: `Nutrition tracking isn't set up yet. Ask your admin to run the database migration.` };
+      }
+      await nutritionLog.create({
         data: {
           userId,
           name:     mealName,
@@ -1187,7 +1195,11 @@ Never invent data. Always reference real numbers from context. "response" is alw
 
     let logs: any[] = [];
     try {
-      logs = await (prisma as any).nutritionLog.findMany({
+      const nutritionLog = (prisma as any).nutritionLog;
+      if (!nutritionLog) {
+        return { success: true, reply: `Nutrition tracking isn't set up yet. Run the database migration to enable meal logging.` };
+      }
+      logs = await nutritionLog.findMany({
         where:   { userId, date: { gte: todayStart } },
         orderBy: { date: 'asc' },
       });
