@@ -39,6 +39,7 @@ type ToolName =
   | 'nutrition_plan'
   | 'macro_calculator'
   | 'log_meal'
+  | 'quick_nutrition'
   | 'nutrition_summary';
 
 interface ConversationMemory {
@@ -128,7 +129,7 @@ const LLMResponseSchema = z.object({
       'weekly_program', 'workout_history', 'adaptive_adjustment',
       'body_metrics', 'achievements', 'streak_info',
       'recovery_plan', 'log_workout',
-      'nutrition_plan', 'macro_calculator', 'log_meal', 'nutrition_summary',
+      'nutrition_plan', 'macro_calculator', 'log_meal', 'nutrition_summary', 'quick_nutrition',
     ]),
     args: z.any().optional(),
   }).optional(),
@@ -600,10 +601,16 @@ OUTPUT — valid JSON only, no markdown, no code fences:
 }
 
 Available tools:
-  TRAINING: generate_workout | next_workout | program_status | weekly_program
-            workout_history | adaptive_adjustment | body_metrics | achievements
-            streak_info | recovery_plan | log_workout
-  NUTRITION: nutrition_plan | macro_calculator | log_meal | nutrition_summary
+  TRAINING:   generate_workout | next_workout | program_status | weekly_program
+              workout_history | adaptive_adjustment | body_metrics | achievements
+              streak_info | recovery_plan | log_workout
+  NUTRITION (full): nutrition_plan → only when user asks for a FULL plan, meal schedule, or says "plan my diet"
+              macro_calculator → only when user asks to calculate macros/calories/TDEE
+              log_meal → when user wants to log/record food they ate
+              nutrition_summary → when user asks how they are doing today, today's intake, progress
+  NUTRITION (quick): quick_nutrition → for ANY short nutrition question: "what should I eat", "best food for X",
+              "what to eat before/after workout", "is X good for my goal", "how much protein in X"
+  NO TOOL: greetings, motivation, general chat, yes/no questions → answer directly in "response" field only
 
 Never invent data. Always reference real numbers from context. "response" is always required.`;
     const userContent =
@@ -676,6 +683,7 @@ Never invent data. Always reference real numbers from context. "response" is alw
       case 'macro_calculator':  return this.macroCalculator(ctx);
       case 'log_meal':          return this.logMeal(userId, tool.args);
       case 'nutrition_summary': return this.nutritionSummary(userId, ctx);
+      case 'quick_nutrition':   return this.quickNutrition(ctx, tool.args);
       default: return { success: false, reply: 'That feature is coming soon.' };
     }
   }
@@ -1086,6 +1094,155 @@ Never invent data. Always reference real numbers from context. "response" is alw
       data: { targets: { calories: cal, protein: pro, carbs: carb, fat }, meals },
     };
   }
+
+  private quickNutrition(ctx: UserContext, args: any): CoachResponse {
+    const question = (args?.question ?? '').toLowerCase();
+    const goal     = (ctx.fitnessGoal ?? '').toLowerCase();
+    const weight   = ctx.weight ?? 75;
+    const isLoss   = goal.includes('loss') || goal.includes('cut');
+    const isGain   = goal.includes('muscle') || goal.includes('gain') || goal.includes('bulk');
+
+    // ── Pre/during/post workout questions ─────────────────────────────────────
+    if (/before|pre.?workout|pre workout|prior to/.test(question)) {
+      return {
+        success: true,
+        reply: `**Pre-workout (1–2h before):**\n\n` +
+          `• 1 banana + 2 boiled eggs — fast carbs + protein\n` +
+          `• Or: 1 cup githeri + black tea\n` +
+          `• Or: 2 slices bread + peanut butter\n\n` +
+          `Aim for **30–40g carbs + 20g protein**. Avoid heavy fats — they slow digestion and kill your energy mid-session.`,
+      };
+    }
+
+    if (/after|post.?workout|post workout|recovery|when.*done|finish/.test(question)) {
+      return {
+        success: true,
+        reply: `**Post-workout (within 45 min — critical window):**\n\n` +
+          `• 3 boiled eggs + 1 banana + 1 cup milk → ~38g protein\n` +
+          `• Or: 150g nyama choma + ugali (1 piece)\n` +
+          `• Or: 1 cup beans + 2 eggs + chai\n\n` +
+          `Target **40–50g protein + fast carbs**. This is when your muscles absorb nutrients fastest — don't skip it.`,
+      };
+    }
+
+    if (/during|while.*workout|burpee|hiit|cardio|running|circuit/.test(question)) {
+      return {
+        success: true,
+        reply: `**During high-intensity sessions (burpees, HIIT, circuits):**\n\n` +
+          `• Sip water every 15 min — ${Math.round(weight * 35 / 1000 * 0.25 * 1000)} ml per hour\n` +
+          `• If session is over 60 min: 1 banana or handful of dates at the halfway point\n` +
+          `• No heavy food mid-workout — blood goes to muscles, not digestion\n\n` +
+          `Fuel the session 1–2h before, recover within 45 min after. During is just water.`,
+      };
+    }
+
+    // ── "What should I eat today" ─────────────────────────────────────────────
+    if (/what.*eat.*(today|now)|today.*eat|eat.*today/.test(question) || question.trim() === '') {
+      const remaining = ctx.todayNutrition
+        ? (ctx.dailyCalorieTarget ?? 2000) - ctx.todayNutrition.calories
+        : ctx.dailyCalorieTarget ?? 2000;
+      const proteinLeft = ctx.todayNutrition
+        ? (ctx.dailyProteinTarget ?? 140) - ctx.todayNutrition.protein
+        : ctx.dailyProteinTarget ?? 140;
+      const mealsLogged = ctx.todayNutrition?.meals ?? 0;
+
+      const suggestion = isLoss
+        ? `eggs + sukuma wiki + black tea for breakfast, grilled chicken + brown rice for lunch, beans + vegetables for dinner`
+        : isGain
+        ? `4 eggs + bread + milk for breakfast, ugali + beef stew + avocado for lunch, rice + lentils + chicken for dinner`
+        : `3 eggs + avocado + chai for breakfast, ugali + chicken + vegetables for lunch, fish + sukuma wiki for dinner`;
+
+      return {
+        success: true,
+        reply: `**Today's eating guide — ${ctx.fitnessGoal.toUpperCase()}**\n\n` +
+          (mealsLogged > 0
+            ? `You've logged ${mealsLogged} meal${mealsLogged !== 1 ? 's' : ''} — **${Math.round(remaining)} kcal** and **${Math.round(proteinLeft)}g protein** remaining.\n\n`
+            : `No meals logged yet — target is **${ctx.dailyCalorieTarget} kcal** and **${ctx.dailyProteinTarget}g protein**.\n\n`) +
+          `Try: ${suggestion}.\n\n` +
+          `Want the full meal plan? Say "give me my full nutrition plan".`,
+      };
+    }
+
+    // ── Protein questions ─────────────────────────────────────────────────────
+    if (/protein|muscle.*food|food.*muscle|build.*muscle/.test(question)) {
+      const target = ctx.dailyProteinTarget ?? Math.round(weight * 2);
+      return {
+        success: true,
+        reply: `**Best protein sources for you — ${target}g/day target:**\n\n` +
+          `• Eggs (6g each) — cheapest per gram in Kenya\n` +
+          `• Nyama choma / beef (26g/100g)\n` +
+          `• Tilapia / fish (22g/100g)\n` +
+          `• Milk 1 cup (8g) — easy extra protein\n` +
+          `• Beans / lentils (9g/100g cooked) — pair with eggs to complete amino acids\n` +
+          `• Groundnuts (7g/30g handful)\n\n` +
+          `Hit protein FIRST at every meal before filling up on carbs.`,
+      };
+    }
+
+    // ── Weight loss food questions ─────────────────────────────────────────────
+    if (/lose|loss|cut|deficit|fat.*burn|burn.*fat|slim/.test(question)) {
+      return {
+        success: true,
+        reply: `**Best foods for fat loss:**\n\n` +
+          `✅ Eat more: eggs, sukuma wiki, fish, beans, cucumber, tomatoes, black tea\n` +
+          `❌ Cut back: ugali portions, white bread, soda, juice, sugar in chai\n\n` +
+          `Rule: **protein at every meal** (keeps you full + preserves muscle). Reduce ugali to 1–2 pieces per meal instead of 4. You'll hit your ${ctx.dailyCalorieTarget} kcal target without feeling empty.`,
+      };
+    }
+
+    // ── Weight gain / bulking questions ───────────────────────────────────────
+    if (/gain|bulk|mass|weight.*up|skinny|underweight/.test(question)) {
+      return {
+        success: true,
+        reply: `**Best foods to gain muscle mass:**\n\n` +
+          `• Ugali + beef stew + avocado — high cal, easy to eat\n` +
+          `• Whole milk (2–3 cups/day adds ~450 kcal)\n` +
+          `• Groundnuts and avocado — dense calories without feeling stuffed\n` +
+          `• Rice + lentils + chicken — complete amino acid profile\n\n` +
+          `Your target is **${ctx.dailyCalorieTarget} kcal**. The key is consistency — eat even when not hungry. Add groundnuts or avocado to every meal to boost calories without volume.`,
+      };
+    }
+
+    // ── Hydration ─────────────────────────────────────────────────────────────
+    if (/water|hydrat|drink/.test(question)) {
+      const ml = Math.round(weight * 35);
+      return {
+        success: true,
+        reply: `**Hydration for ${weight}kg:**\n\n` +
+          `• Daily target: **${ml} ml** (~${Math.round(ml / 250)} glasses)\n` +
+          `• On training days: add 500 ml extra\n` +
+          `• Morning: 500 ml before breakfast\n` +
+          `• Signs of dehydration: dark urine, headache, poor performance\n\n` +
+          `Chai counts — but limit sugar. Soda and juice do NOT count toward hydration.`,
+      };
+    }
+
+    // ── Specific exercise nutrition (burpees, squats, etc) ───────────────────
+    if (/squat|deadlift|bench|lift|strength|weights/.test(question)) {
+      return {
+        success: true,
+        reply: `**Eating for strength training:**\n\n` +
+          `• 2h before: ugali (2 pieces) + 2 eggs or beans — slow carbs + protein\n` +
+          `• Within 45 min after: 3 eggs + milk + banana — repair and grow\n` +
+          `• Daily: hit your **${ctx.dailyProteinTarget ?? Math.round(weight * 2)}g protein** — without it, sessions build nothing\n\n` +
+          `Progressive overload + protein = muscle. You can't out-train a protein deficit.`,
+      };
+    }
+
+    // ── Fallback for unmatched short nutrition questions ─────────────────────
+    const proteinTarget = ctx.dailyProteinTarget ?? Math.round(weight * 2);
+    const calTarget     = ctx.dailyCalorieTarget ?? 2000;
+    return {
+      success: true,
+      reply: `**Quick answer for your goal (${ctx.fitnessGoal}):**\n\n` +
+        `Targets: **${calTarget} kcal | ${proteinTarget}g protein** per day.\n\n` +
+        isLoss
+          ? `Focus on: eggs, fish, sukuma wiki, beans. Cut ugali portions in half. Protein first at every meal.`
+          : isGain
+          ? `Focus on: ugali + beef + milk + avocado. Never skip meals. Eat within 30 min of waking.`
+          : `Balance carbs around workouts. Protein at every meal. Consistent timing beats perfect eating.`,
+    };
+        }
 
   private macroCalculator(ctx: UserContext): CoachResponse {
     const weight = ctx.weight ?? 75;
