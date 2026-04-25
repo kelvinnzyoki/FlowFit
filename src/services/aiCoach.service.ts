@@ -526,11 +526,18 @@ class AICoachService {
     const contextBlock = this.formatContextBlock(ctx, memory);
 
     // Compute TDEE and fatigue context strings for the prompt
-    const fatigue    = memory.fatigueScore ?? 0;
-    const adherence  = memory.adherenceScore ?? 80;
-    const inDeficit = (ctx.dailyCalorieTarget ?? 9999) < (ctx.weight ?? 75) * 10 * 1.55 * 0.95;
+    const fatigue      = memory.fatigueScore ?? 0;
+    const adherence    = memory.adherenceScore ?? 80;
+    const inDeficit    = (ctx.dailyCalorieTarget ?? 9999) < (ctx.weight ?? 75) * 10 * 1.55 * 0.95;
     const proteinShort = ctx.todayNutrition
-      ? (ctx.dailyProteinTarget ?? 0) - ctx.todayNutrition.protein > 20 : false;
+      ? (ctx.dailyProteinTarget ?? 0) - ctx.todayNutrition.protein > 20
+      : false;
+    const nutritionNote = inDeficit
+      ? `Athlete is in a calorie deficit — if nutrition comes up, remind them protein floor is ${ctx.dailyProteinTarget ?? 140}g/day.`
+      : `Athlete is in surplus or maintenance — carbs support performance on training days.`;
+    const proteinNote = proteinShort
+      ? `Athlete has a protein gap today (${(ctx.dailyProteinTarget ?? 0) - (ctx.todayNutrition?.protein ?? 0)}g short) — mention this only if nutrition is the topic.`
+      : '';
 
     const systemPrompt = `You are FlowFit AI Coach — a world-class hybrid of an elite strength & conditioning coach, registered sports dietitian, and performance psychologist. You have full access to the athlete's real-time data below and MUST use it in every response.
 
@@ -556,8 +563,7 @@ PERIODISATION AWARENESS:
 NUTRITION × TRAINING INTEGRATION:
 - Pre-workout (1-2h before): 30-40g carbs + 20g protein → name specific foods
 - Post-workout (within 45 min): 40-50g protein + fast carbs → name specific foods
-- ${inDeficit ? 'DEFICIT DETECTED: Preserve muscle — protein floor is ' + (ctx.dailyProteinTarget ?? 140) + 'g/day. Time carbs around workouts.' : 'SURPLUS/MAINTENANCE: Fuel performance. Carbs are your friend on training days.'}
-- ${proteinShort ? 'PROTEIN ALERT: Athlete is short on protein today — recommend a high-protein food immediately.' : ''}
+- Context: ${nutritionNote}${proteinNote ? '\n- Note: ' + proteinNote : ''}
 - Hydration: 35 ml/kg = ${Math.round((ctx.weight ?? 75) * 35)} ml/day for this athlete
 
 BIOMECHANICS & EXERCISE SCIENCE:
@@ -579,10 +585,12 @@ PSYCHOLOGICAL COACHING:
 - Use the athlete's name (${ctx.name}) naturally but not every message
 
 ━━ RESPONSE FORMAT — NON-NEGOTIABLE ━━
+- ALWAYS answer what the athlete ACTUALLY ASKED — never redirect to nutrition unless they asked about it
 - "response" field: 1–3 sentences MAX, 60 words hard limit, punchy and direct
 - Use tools for ALL detailed output (plans, history, metrics, nutrition breakdowns)
 - Never put bullet lists or headers inside "response" — that goes in tool output
 - Omit "tool" key entirely when no tool is needed
+- A greeting gets a greeting back — do NOT call any tool for casual messages
 
 OUTPUT — valid JSON only, no markdown, no code fences:
 {
