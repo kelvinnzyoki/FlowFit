@@ -316,13 +316,13 @@ class AICoachService {
       prisma.streak.findUnique({ where: { userId } }),
 
       // Nutrition — today's meals
-      prisma.nutritionLog.findMany({
+      (prisma as any).nutritionLog.findMany({
         where: { userId, date: { gte: todayStart } },
         select: { calories: true, protein: true, carbs: true, fat: true },
       }).catch(() => [] as any[]),
 
       // Nutrition — this week's logs for adherence calculation
-      prisma.nutritionLog.findMany({
+      (prisma as any).nutritionLog.findMany({
         where: { userId, date: { gte: weeksAgo(1) } },
         select: { date: true },
       }).catch(() => [] as any[]),
@@ -524,7 +524,7 @@ class AICoachService {
     // Compute TDEE and fatigue context strings for the prompt
     const fatigue    = memory.fatigueScore ?? 0;
     const adherence  = memory.adherenceScore ?? 80;
-    const inDeficit  = ctx.dailyCalorieTarget < (ctx.weight ?? 75) * 10 * 1.55 * 0.95;
+    const inDeficit = (ctx.dailyCalorieTarget ?? 9999) < (ctx.weight ?? 75) * 10 * 1.55 * 0.95;
     const proteinShort = ctx.todayNutrition
       ? (ctx.dailyProteinTarget ?? 0) - ctx.todayNutrition.protein > 20 : false;
 
@@ -1253,7 +1253,8 @@ Never invent data. Always reference real numbers from context. "response" is alw
         (ctx.nutritionAdherence7d !== undefined ? `\n\n📊 7-day logging adherence: **${ctx.nutritionAdherence7d}%**` : ''),
       data: { totals: Object.fromEntries(Object.entries(totals).map(([k,v]) => [k, Math.round(v as number)])), remaining: { calories: calRemain, protein: proRemain, carbs: carbRemain, fat: fatRemain } },
     };
-        }
+  }
+
   // EMBEDDINGS
   private generateEmbedding(text: string): number[] {
     const v = new Array<number>(EMBED_DIMS).fill(0);
