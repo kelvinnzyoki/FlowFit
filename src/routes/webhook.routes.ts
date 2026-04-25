@@ -385,34 +385,7 @@ router.post(
       return;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // FIX-011: TIMESTAMP VALIDATION (Prevents replay attacks)
-    // 
-    // Reject webhooks older than 5 minutes. This prevents attackers from
-    // replaying old captured webhooks to manipulate subscriptions.
-    // 
-    // Example attack: Attacker intercepts "subscription.created" webhook from
-    // 6 months ago and replays it to reactivate a cancelled subscription.
-    // ═══════════════════════════════════════════════════════════════════════════
     
-    const eventAge = Date.now() / 1000 - event.created;
-    const MAX_AGE_SECONDS = 300; // 5 minutes
-
-    if (eventAge > MAX_AGE_SECONDS) {
-      console.warn(
-        `[Webhook] Ignoring old event: ${event.id} ` +
-        `(age: ${Math.floor(eventAge)}s, max: ${MAX_AGE_SECONDS}s)`
-      );
-      // FIX-9: Return 200 (not 400) so Stripe doesn't mark the endpoint as failing
-      // and keep retrying. We're choosing to ignore the event, not failing to process it.
-      return res.json({ received: true, ignored: true, reason: 'event_too_old' });
-    }
-
-    if (eventAge < 0) {
-      console.warn(`[Webhook] Ignoring future event: ${event.id} (created: ${event.created})`);
-      // FIX-9: Same — return 200 so Stripe doesn't retry.
-      return res.json({ received: true, ignored: true, reason: 'future_timestamp' });
-    }
 
     // FIX-1: Atomic idempotency — create the record FIRST inside a try/catch.
     // The unique constraint on externalId fires if another instance already claimed
