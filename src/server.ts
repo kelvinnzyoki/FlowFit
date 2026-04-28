@@ -13,8 +13,7 @@ import { errorHandler, notFoundHandler } from './middleware/error.middleware.js'
 import { standardLimiter } from './middleware/rateLimiter.js';
 import prisma from './config/db.js';
 import redis from './config/redis.js';
-import subscriptionRoutes from './routes/subscription.routes.js';
-import webhookRoutes from './routes/webhook.routes.js';
+import webhookRoutes from './routes/paystack.webhook.routes.js';
 import exerciseRoutes from "./routes/exercise.routes.js";
 import cookieParser from 'cookie-parser';
 import aiRoutes from './routes/ai.routes.js';
