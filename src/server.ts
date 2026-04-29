@@ -18,7 +18,7 @@ import exerciseRoutes from "./routes/exercise.routes.js";
 import cookieParser from 'cookie-parser';
 import aiRoutes from './routes/ai.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
-
+import subscriptionRoutes from './routes/subscription.routes.js';
 // ============================================
 // CREATE EXPRESS APP
 // ============================================
@@ -180,6 +180,7 @@ app.use('/api/v1', routes);
 
 app.use('/api/v1/ai',            aiRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/subscriptions', subscriptionRoutes);
 
 // ============================================
 // ERROR HANDLING
