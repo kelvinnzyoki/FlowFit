@@ -10,8 +10,13 @@
 
 import crypto from 'crypto';
 
+
+
 if (!process.env.PAYSTACK_SECRET_KEY) {
-  throw new Error('PAYSTACK_SECRET_KEY env var is required');
+  console.error(
+    '[paystack.service] PAYSTACK_SECRET_KEY is not set. ' +
+    'All Paystack payment calls will fail. Set this env var in Vercel → Settings → Environment Variables.',
+  );
 }
 
 const SECRET_KEY = process.env.PAYSTACK_SECRET_KEY!;
