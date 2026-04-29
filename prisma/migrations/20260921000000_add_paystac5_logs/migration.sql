@@ -21,10 +21,10 @@ ALTER TABLE webhook_events
 DROP TYPE IF EXISTS "Provider";
 
 -- ── 6. Drop the old stripe_ columns if they still exist
-ALTER TABLE subscriptions DROP COLUMN IF EXISTS stripe_subscription_id;
-ALTER TABLE subscriptions DROP COLUMN IF EXISTS stripe_checkout_session_id;
-ALTER TABLE payments      DROP COLUMN IF EXISTS stripe_invoice_id;
-ALTER TABLE payments      DROP COLUMN IF EXISTS stripe_payment_intent_id;
-ALTER TABLE users         DROP COLUMN IF EXISTS stripe_customer_id;
-ALTER TABLE plans         DROP COLUMN IF EXISTS stripe_price_id_monthly;
-ALTER TABLE plans         DROP COLUMN IF EXISTS stripe_price_id_yearly;
+ALTER TABLE subscriptions DROP COLUMN IF EXISTS stripeSubscriptionId;
+ALTER TABLE subscriptions DROP COLUMN IF EXISTS stripeCheckoutSessionId;
+ALTER TABLE payments      DROP COLUMN IF EXISTS stripeInvoiceId;
+ALTER TABLE payments      DROP COLUMN IF EXISTS stripePaymentIntentId;
+ALTER TABLE users         DROP COLUMN IF EXISTS stripeCustomerId;
+ALTER TABLE plans         DROP COLUMN IF EXISTS stripePriceIdMonthly;
+ALTER TABLE plans         DROP COLUMN IF EXISTS stripePriceIdYearly;
