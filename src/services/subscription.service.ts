@@ -92,9 +92,9 @@ function toPublicPlan(plan: any): PublicPlan {
     hasPersonalCoaching:  plan.hasPersonalCoaching,
     hasNutritionTracking: plan.hasNutritionTracking,
     hasOfflineAccess:     plan.hasOfflineAccess,
-    features: Array.isArray(plan.features)
-      ? plan.features as string[]
-      : [],
+    features:             Array.isArray(plan.features)
+                            ? plan.features as string[]
+                            : [],
     displayOrder:         plan.displayOrder,
     isPopular:            plan.isPopular,
   };
