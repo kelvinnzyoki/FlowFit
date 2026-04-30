@@ -1,54 +1,5 @@
 /**
- * FLOWFIT — Subscription Service (v6)
- *
- * Migration: Stripe → Paystack (v3 → v6).
- *
- * CHANGES FROM v5:
- *   STR→PS-1  Removed all Stripe imports and stripe.* API calls.
- *             Replaced with Paystack equivalents from paystack.service.ts.
- *
- *   STR→PS-2  createCheckoutSession: now calls Paystack transaction/initialize.
- *             Returns { url: authorization_url, reference } instead of
- *             { url: stripeCheckoutUrl, sessionId }.
- *             DB field: stripeCheckoutSessionId → paystackReference.
- *
- *   STR→PS-3  cancelSubscription: Paystack subs are cancelled by calling
- *             POST /subscription/disable with { code, token }.
- *             Both paystackSubscriptionCode AND paystackEmailToken must be
- *             present — if either is missing, falls back to DB-only cancel
- *             (covers M-Pesa subs and incomplete Paystack checkouts).
- *
- *   STR→PS-4  reactivateSubscription: calls POST /subscription/enable with
- *             { code, token } when Paystack codes are available.
- *
- *   STR→PS-5  upgradeSubscription: Paystack has no direct price-swap equivalent
- *             (unlike Stripe's subscription item update). Upgrades for Paystack
- *             subs now initiate a new checkout session; the old subscription is
- *             disabled and the DB record replaced once the new charge succeeds
- *             via the webhook. Throws with a clear message so the route can
- *             redirect the client to /checkout instead of /upgrade.
- *
- *   STR→PS-6  scheduleDowngrade: previously called stripe.subscriptions.update
- *             to set metadata. Now DB-only — Paystack does not support metadata
- *             on scheduled plan changes. The scheduled change is stored in DB
- *             and applied by the cron job or webhook handler on period end.
- *
- *   STR→PS-7  getBillingPortalUrl: Paystack has no hosted billing portal.
- *             Returns the frontend subscription management page URL so the
- *             client can redirect there instead of opening a Paystack-hosted UI.
- *
- *   STR→PS-8  getCurrentSubscription: returns paystackSubscriptionCode +
- *             paystackEmailToken instead of stripeSubscriptionId.
- *
- *   STR→PS-9  getFrontendUrl warning: updated to mention Paystack.
- *
- * M-Pesa fixes carried over from v5 (unchanged):
- *   NEW-R1  handleMpesaSuccess: clear gracePeriodEndsAt + reset mpesaRenewalAttempts.
- *   NEW-R2  handleMpesaFailure: map 1032/1037 to CANCELLED/TIMEOUT; grace period on failure.
- *   NEW-R3  runExpiry: skip sub if recent SUCCESS mpesaTransaction exists.
- *   NEW-R4  createMpesaSubscription: block cross-provider duplicate active subscriptions.
- *   NEW-R5  runReconciliation: scan M-Pesa SUCCESS txns and fix drift.
- *   NEW-R6  runMpesaRenewals / runRetries: set gracePeriodEndsAt on STK initiation.
+ * FLOWFIT — Subscription Service (v7 — Paystack Fixed)
  */
 
 import {
@@ -59,8 +10,8 @@ import {
 import type { PublicPlan, CurrentSubscription } from '../types/subscription.types.js';
 import {
   initializeTransaction,
-  disableSubscription  as paystackDisable,
-  enableSubscription   as paystackEnable,
+  disableSubscription as paystackDisable,
+  enableSubscription as paystackEnable,
   getOrCreatePaystackCustomer,
 } from './paystack.service.js';
 import {
@@ -78,118 +29,10 @@ function daysUntil(date: Date | null | undefined): number | null {
 }
 
 function toPublicPlan(plan: any): PublicPlan {
-  return {
-    id:                   plan?.id || '',
-    slug:                 plan?.slug || 'unknown',
-    name:                 plan?.name || 'Unknown Plan',
-    description:          plan?.description || null,
-    monthlyPriceCents:    plan?.monthlyPriceCents || 0,
-    yearlyPriceCents:     plan?.yearlyPriceCents || 0,
-    trialDays:            plan?.trialDays || 0,
-    maxWorkoutsPerMonth:  plan?.maxWorkoutsPerMonth ?? null,
-    maxPrograms:          plan?.maxPrograms ?? null,
-    hasAdvancedAnalytics: plan?.hasAdvancedAnalytics ?? false,
-    hasPersonalCoaching:  plan?.hasPersonalCoaching ?? false,
-    hasNutritionTracking: plan?.hasNutritionTracking ?? false,
-    hasOfflineAccess:     plan?.hasOfflineAccess ?? false,
-    features:             Array.isArray(plan?.features) 
-                            ? plan.features 
-                            : typeof plan?.features === 'string' 
-                              ? JSON.parse(plan.features) 
-                              : [],
-    displayOrder:         plan?.displayOrder || 0,
-    isPopular:            plan?.isPopular ?? false,
-  };
-}
-async function logEvent(
-  subscriptionId: string,
-  event:          SubscriptionEvent,
-  previousStatus: SubscriptionStatus | null | undefined,
-  newStatus:      SubscriptionStatus | null | undefined,
-  metadata:       Record<string, unknown> = {},
-  ipAddress?:     string,
-): Promise<void> {
-  await prisma.subscriptionLog.create({
-    data: {
-      subscriptionId,
-      event,
-      previousStatus: previousStatus ?? undefined,
-      newStatus:      newStatus      ?? undefined,
-      metadata:       metadata as any,
-      ipAddress,
-    },
-  });
-}
-
-function getFrontendUrl(): string {
-  const url = process.env.FRONTEND_URL || process.env.APP_URL || '';
-  if (!url) {
-    console.warn(
-      '[subscription.service] Neither FRONTEND_URL nor APP_URL is set — ' +
-      'Paystack redirects will be broken.',
-    );
-  }
-  return url;
-}
-
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-export async function getPlans(): Promise<PublicPlan[]> {
-  const plans = await prisma.plan.findMany({
-    where:   { isActive: true },
-    orderBy: { displayOrder: 'asc' },
-  });
-  return plans.map(toPublicPlan);
-}
-
-export async function getCurrentSubscription(
-  userId: string,
-): Promise<CurrentSubscription | null> {
-  const rows = await prisma.subscription.findMany({
-    where:   { userId },
-    orderBy: { createdAt: 'desc' },
-    take:    10,
-    include: { 
-      plan: true   // This can fail if relation mapping is broken
-    },
-  });
-
-  if (!rows.length) return null;
-
-  const STATUS_PRIORITY: Record<string, number> = {
-    ACTIVE:             0,
-    TRIALING:           1,
-    PAST_DUE:           2,
-    GRACE_PERIOD:       3,
-    PAUSED:             4,
-    INCOMPLETE:         5,
-    INCOMPLETE_EXPIRED: 6,
-    CANCELLED:          7,
-    EXPIRED:            8,
-  };
-
-  const ranked = [...rows].sort((a, b) => {
-    const pa = STATUS_PRIORITY[a.status] ?? 9;
-    const pb = STATUS_PRIORITY[b.status] ?? 9;
-    if (pa !== pb) return pa - pb;
-    return b.createdAt.getTime() - a.createdAt.getTime();
-  });
-
-  const sub = ranked[0];
-  if (!sub) return null;
-
-  // Defensive: handle missing plan relation
-  let publicPlan: PublicPlan;
-  if (sub.plan) {
-    publicPlan = toPublicPlan(sub.plan);
-  } else {
-    // Fallback: fetch plan separately if relation failed
-    const fallbackPlan = await prisma.plan.findUnique({
-      where: { id: sub.planId },
-    });
-    publicPlan = fallbackPlan ? toPublicPlan(fallbackPlan) : {
-      id: sub.planId,
-      slug: 'unknown',
+  if (!plan) {
+    return {
+      id: '',
+      slug: 'pro' as const,           // Fixed: must be valid PlanSlug
       name: 'Unknown Plan',
       description: null,
       monthlyPriceCents: 0,
@@ -207,47 +50,148 @@ export async function getCurrentSubscription(
     };
   }
 
-  let scheduledPlanSlug: string | null = null;
-  if (sub.scheduledPlanId) {
-    const sp = await prisma.plan.findUnique({
-      where: { id: sub.scheduledPlanId },
-      select: { slug: true },
-    });
-    scheduledPlanSlug = sp?.slug ?? null;
-  }
-
   return {
-    id:                      sub.id,
-    status:                  sub.status,
-    interval:                sub.interval,
-    plan:                    publicPlan,
-    trialEndsAt:             sub.trialEndsAt?.toISOString() ?? null,
-    currentPeriodStart:      sub.currentPeriodStart?.toISOString() ?? null,
-    currentPeriodEnd:        sub.currentPeriodEnd?.toISOString() ?? null,
-    cancelAtPeriodEnd:       sub.cancelAtPeriodEnd ?? false,
-    cancelledAt:             sub.cancelledAt?.toISOString() ?? null,
-    scheduledPlanSlug,
-    activatedAt:             sub.activatedAt?.toISOString() ?? null,
-    daysUntilRenewal:        daysUntil(sub.currentPeriodEnd),
-    paystackSubscriptionCode: sub.paystackSubscriptionCode ?? null,
-    paystackEmailToken:       sub.paystackEmailToken ?? null,
+    id:                   plan.id || '',
+    slug:                 (plan.slug as any) || 'pro',   // safe cast
+    name:                 plan.name || 'Unknown Plan',
+    description:          plan.description || null,
+    monthlyPriceCents:    plan.monthlyPriceCents || 0,
+    yearlyPriceCents:     plan.yearlyPriceCents || 0,
+    trialDays:            plan.trialDays || 0,
+    maxWorkoutsPerMonth:  plan.maxWorkoutsPerMonth ?? null,
+    maxPrograms:          plan.maxPrograms ?? null,
+    hasAdvancedAnalytics: plan.hasAdvancedAnalytics ?? false,
+    hasPersonalCoaching:  plan.hasPersonalCoaching ?? false,
+    hasNutritionTracking: plan.hasNutritionTracking ?? false,
+    hasOfflineAccess:     plan.hasOfflineAccess ?? false,
+    features:             Array.isArray(plan.features)
+                            ? plan.features
+                            : typeof plan.features === 'string'
+                              ? JSON.parse(plan.features || '[]')
+                              : [],
+    displayOrder:         plan.displayOrder || 0,
+    isPopular:            plan.isPopular ?? false,
   };
 }
 
-// ─── STR→PS-2: Paystack checkout (replaces Stripe checkout session) ───────────
-//
-// Flow:
-//   1. Resolve the Paystack plan code for the chosen interval.
-//   2. Ensure a Paystack customer code exists for the user (getOrCreatePaystackCustomer).
-//   3. Call Paystack POST /transaction/initialize — returns authorization_url + reference.
-//   4. Create an INCOMPLETE subscription row with paystackReference (= transaction ref).
-//   5. Return { url: authorization_url, reference } to the caller.
-//
-// On successful payment Paystack fires a `charge.success` webhook (handled in
-// webhook_routes.ts). That handler activates the subscription, stores
-// paystackSubscriptionCode + paystackEmailToken from the webhook payload, and
-// updates the paystackCustomerCode on the User row.
-//
+async function logEvent(
+  subscriptionId: string,
+  event:          SubscriptionEvent,
+  previousStatus: SubscriptionStatus | null | undefined,
+  newStatus:      SubscriptionStatus | null | undefined,
+  metadata:       Record<string, unknown> = {},
+  ipAddress?:     string,
+): Promise<void> {
+  try {
+    await prisma.subscriptionLog.create({
+      data: {
+        subscriptionId,
+        event,
+        previousStatus: previousStatus ?? undefined,
+        newStatus:      newStatus ?? undefined,
+        metadata:       metadata as any,
+        ipAddress,
+      },
+    });
+  } catch (err) {
+    console.error(`[logEvent] Failed for sub ${subscriptionId}:`, err);
+  }
+}
+
+function getFrontendUrl(): string {
+  const url = process.env.FRONTEND_URL || process.env.APP_URL || '';
+  if (!url) {
+    console.warn('[subscription.service] FRONTEND_URL or APP_URL not set');
+  }
+  return url;
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+export async function getPlans(): Promise<PublicPlan[]> {
+  try {
+    const plans = await prisma.plan.findMany({
+      where:   { isActive: true },
+      orderBy: { displayOrder: 'asc' },
+    });
+    return plans.map(toPublicPlan);
+  } catch (err) {
+    console.error('[getPlans] Error:', err);
+    return [];
+  }
+}
+
+export async function getCurrentSubscription(
+  userId: string,
+): Promise<CurrentSubscription | null> {
+  try {
+    const rows = await prisma.subscription.findMany({
+      where:   { userId },
+      orderBy: { createdAt: 'desc' },
+      take:    10,
+      include: { plan: true },
+    });
+
+    if (!rows.length) return null;
+
+    const STATUS_PRIORITY: Record<string, number> = {
+      ACTIVE:             0,
+      TRIALING:           1,
+      PAST_DUE:           2,
+      GRACE_PERIOD:       3,
+      PAUSED:             4,
+      INCOMPLETE:         5,
+      INCOMPLETE_EXPIRED: 6,
+      CANCELLED:          7,
+      EXPIRED:            8,
+    };
+
+    const ranked = [...rows].sort((a, b) => {
+      const pa = STATUS_PRIORITY[a.status] ?? 9;
+      const pb = STATUS_PRIORITY[b.status] ?? 9;
+      if (pa !== pb) return pa - pb;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
+
+    const sub = ranked[0];
+    if (!sub) return null;
+
+    // Defensive plan handling
+    const planData = sub.plan || await prisma.plan.findUnique({ where: { id: sub.planId } });
+    const plan = toPublicPlan(planData);
+
+    let scheduledPlanSlug: string | null = null;
+    if (sub.scheduledPlanId) {
+      const sp = await prisma.plan.findUnique({
+        where: { id: sub.scheduledPlanId },
+        select: { slug: true },
+      });
+      scheduledPlanSlug = sp?.slug ?? null;
+    }
+
+    return {
+      id:                      sub.id,
+      status:                  sub.status,
+      interval:                sub.interval,
+      plan,
+      trialEndsAt:             sub.trialEndsAt?.toISOString() ?? null,
+      currentPeriodStart:      sub.currentPeriodStart?.toISOString() ?? null,
+      currentPeriodEnd:        sub.currentPeriodEnd?.toISOString() ?? null,
+      cancelAtPeriodEnd:       sub.cancelAtPeriodEnd ?? false,
+      cancelledAt:             sub.cancelledAt?.toISOString() ?? null,
+      scheduledPlanSlug,
+      activatedAt:             sub.activatedAt?.toISOString() ?? null,
+      daysUntilRenewal:        daysUntil(sub.currentPeriodEnd),
+      paystackSubscriptionCode: sub.paystackSubscriptionCode ?? null,
+      paystackEmailToken:       sub.paystackEmailToken ?? null,
+    };
+  } catch (err: any) {
+    console.error('[getCurrentSubscription] Error for user', userId, err);
+    return null;
+  }
+}
+
+// ─── Create Checkout Session ──────────────────────────────────────────────────
 export async function createCheckoutSession(
   userId:      string,
   email:       string,
@@ -257,42 +201,30 @@ export async function createCheckoutSession(
   successUrl?: string,
   cancelUrl?:  string,
 ): Promise<{ authorizationUrl: string; reference: string; accessCode: string }> {
-  const plan = await prisma.plan.findUnique({ where: { id: planId } });
-  if (!plan)          throw new Error('Plan not found');
+  const plan = await prisma.plan.findUnique({ 
+    where: { id: planId } 
+  });
+
+  if (!plan) throw new Error('Plan not found');
   if (!plan.isActive) throw new Error('Plan is no longer available');
 
-  // Paystack plan codes enable automatic recurring billing on the Paystack side.
-  // If not yet configured in the Paystack dashboard, fall back to a one-time
-  // transaction charge — your webhook + cron handle renewals in that case.
-  // Paystack plan codes (for recurring)
-  
-  // Paystack plan codes (for recurring)
-  const paystackPlanCode = interval === 'YEARLY'
-    ? plan.paystackPlanCodeYearly
+  const amount = interval === 'YEARLY' ? plan.yearlyPriceCents : plan.monthlyPriceCents;
+  const paystackPlanCode = interval === 'YEARLY' 
+    ? plan.paystackPlanCodeYearly 
     : plan.paystackPlanCodeMonthly;
 
   if (!paystackPlanCode) {
     console.warn(`[createCheckoutSession] No Paystack plan code for \( {plan.slug}/ \){interval}. Proceeding as one-time charge.`);
   }
 
-  const amount = interval === 'YEARLY' ? plan.yearlyPriceCents : plan.monthlyPriceCents;
-
-  const paystackCustomerCode = await getOrCreatePaystackCustomer(
-    prisma, userId, email, name,
-  );
-
-  
-
-  // NEW-R4: Block if the user already has an active or trialing subscription
-  // from ANY provider. Without this, a Paystack checkout could run while an
-  // M-Pesa subscription is active, creating two concurrent paid subscriptions.
+  // Block duplicate active subscriptions
   const activeAnySub = await prisma.subscription.findFirst({
     where: { userId, status: { in: ['ACTIVE', 'TRIALING'] } },
   });
   if (activeAnySub) {
     throw new Error(
       `User already has an ${activeAnySub.status} ${activeAnySub.provider} subscription. ` +
-      'Cancel or upgrade the existing subscription first.',
+      'Cancel or upgrade the existing subscription first.'
     );
   }
 
@@ -301,20 +233,19 @@ export async function createCheckoutSession(
     orderBy: { createdAt: 'desc' },
   });
 
-  const base               = getFrontendUrl();
+  const base = getFrontendUrl();
   const resolvedSuccessUrl = successUrl || `${base}/subscription?success=1`;
-  const resolvedCancelUrl  = cancelUrl  || `${base}/subscription?cancelled=1`;
-  // Ensure a Paystack customer code exists for the user
+  const resolvedCancelUrl = cancelUrl || `${base}/subscription?cancelled=1`;
+
   const paystackCustomerCode = await getOrCreatePaystackCustomer(
-    prisma, userId, email, name,
+    prisma, userId, email, name
   );
 
-  // Paystack transaction/initialize — the plan code makes it a recurring subscription
   const txn = await initializeTransaction({
     email,
     amount,
     currency: 'KES',
-    ...(paystackPlanCode && { plan: paystackPlanCode }),   // only add if present
+    ...(paystackPlanCode ? { plan: paystackPlanCode } : {}),
     callback_url: resolvedSuccessUrl,
     metadata: {
       userId,
@@ -330,29 +261,31 @@ export async function createCheckoutSession(
     data: {
       userId,
       planId,
-      status:           'INCOMPLETE',
+      status: 'INCOMPLETE',
       interval,
-      paystackReference: txn.reference,   // echoed back in charge.success webhook
+      provider: 'PAYSTACK',
+      paystackReference: txn.reference,
       paystackCustomerCode,
       trialStartedAt: plan.trialDays > 0 && !existing ? new Date() : null,
-      trialEndsAt:    plan.trialDays > 0 && !existing
+      trialEndsAt: plan.trialDays > 0 && !existing
         ? new Date(Date.now() + plan.trialDays * 86_400_000)
         : null,
     },
   });
 
   await logEvent(pendingSub.id, 'CREATED', null, 'INCOMPLETE', {
-    planSlug:  plan.slug,
+    planSlug: plan.slug,
     interval,
     reference: txn.reference,
   });
 
   return {
     authorizationUrl: txn.authorization_url,
-    reference:        txn.reference,
-    accessCode:       (txn as any).access_code ?? '',
+    reference: txn.reference,
+    accessCode: (txn as any).access_code ?? '',
   };
 }
+
 
 // ─── M-Pesa subscription initiation ──────────────────────────────────────────
 // (unchanged from v5 — M-Pesa flow is provider-independent)
@@ -1340,5 +1273,6 @@ export async function runReconciliation(): Promise<{
   console.log(`[reconcile] Done — checked=${checked} fixed=${fixed} errors=${errors}`);
   return { checked, fixed, errors };
 }
-
+export const createPaystackCheckout = createCheckoutSession;
+export { prisma };
 
