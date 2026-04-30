@@ -229,14 +229,20 @@ export async function createCheckoutSession(
   if (!plan)          throw new Error('Plan not found');
   if (!plan.isActive) throw new Error('Plan is no longer available');
 
-  // Paystack plan codes (set up in your Paystack dashboard + stored in DB)
+  // Paystack plan codes enable automatic recurring billing on the Paystack side.
+  // If not yet configured in the Paystack dashboard, fall back to a one-time
+  // transaction charge — your webhook + cron handle renewals in that case.
   const paystackPlanCode = interval === 'YEARLY'
     ? plan.paystackPlanCodeYearly
     : plan.paystackPlanCodeMonthly;
 
+  // Log a warning so you know to add the plan codes in the Paystack dashboard,
+  // but do NOT throw — the checkout can still proceed as a one-time charge.
   if (!paystackPlanCode) {
-    throw new Error(
-      `Paystack plan not configured for plan "${plan.slug}" / ${interval}`,
+    console.warn(
+      `[subscription] Paystack plan code not set for "${plan.slug}" / ${interval}. ` +
+      'Charging as one-time transaction. Add paystackPlanCodeMonthly / paystackPlanCodeYearly ' +
+      'in the Paystack dashboard and update the plans table to enable auto-recurring billing.',
     );
   }
 
@@ -259,9 +265,8 @@ export async function createCheckoutSession(
   });
 
   const base               = getFrontendUrl();
-  const resolvedSuccessUrl = successUrl || `${base}/subscription.html?success=1`;
-  const resolvedCancelUrl  = cancelUrl  || `${base}/subscription.html?cancelled=1`;
-
+  const resolvedSuccessUrl = successUrl || `${base}/subscription?success=1`;
+  const resolvedCancelUrl  = cancelUrl  || `${base}/subscription?cancelled=1`;
   // Ensure a Paystack customer code exists for the user
   const paystackCustomerCode = await getOrCreatePaystackCustomer(
     prisma, userId, email, name,
@@ -271,10 +276,8 @@ export async function createCheckoutSession(
   const txn = await initializeTransaction({
     email,
     amount:       interval === 'YEARLY' ? plan.yearlyPriceCents : plan.monthlyPriceCents,
-    // Paystack amounts are in the smallest currency unit (kobo for NGN, cents for USD/KES).
-    // Verify your Paystack dashboard currency matches; KES on Paystack is in cents.
     currency:     'KES',
-    plan:         paystackPlanCode,
+    ...(paystackPlanCode ? { plan: paystackPlanCode } : {}),
     callback_url: resolvedSuccessUrl,
     metadata: {
       userId,
@@ -282,10 +285,10 @@ export async function createCheckoutSession(
       interval,
       cancelUrl:              resolvedCancelUrl,
       existingSubscriptionId: existing?.id ?? '',
-      // Trial: only offered when no prior sub exists
       trialDays: plan.trialDays > 0 && !existing ? plan.trialDays : 0,
     },
   });
+  
 
   const pendingSub = await prisma.subscription.create({
     data: {
@@ -1153,8 +1156,7 @@ export async function getBillingPortalUrl(userId: string): Promise<string> {
   const frontendBase = getFrontendUrl();
   // Optionally append ?manage=1 so the frontend can auto-scroll to the
   // management section or show a "Welcome back" prompt.
-  return `${frontendBase}/subscription.html?manage=1`;
-}
+  return `${frontendBase}/subscription?manage=1`;
 
 
 // ─── Alias for subscription.routes.ts ────────────────────────────────────────
