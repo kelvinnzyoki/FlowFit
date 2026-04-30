@@ -1274,5 +1274,4 @@ export async function runReconciliation(): Promise<{
   return { checked, fixed, errors };
 }
 export const createPaystackCheckout = createCheckoutSession;
-export { prisma };
 
