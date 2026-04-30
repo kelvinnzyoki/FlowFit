@@ -79,27 +79,28 @@ function daysUntil(date: Date | null | undefined): number | null {
 
 function toPublicPlan(plan: any): PublicPlan {
   return {
-    id:                   plan.id,
-    slug:                 plan.slug,
-    name:                 plan.name,
-    description:          plan.description,
-    monthlyPriceCents:    plan.monthlyPriceCents,
-    yearlyPriceCents:     plan.yearlyPriceCents,
-    trialDays:            plan.trialDays,
-    maxWorkoutsPerMonth:  plan.maxWorkoutsPerMonth,
-    maxPrograms:          plan.maxPrograms,
-    hasAdvancedAnalytics: plan.hasAdvancedAnalytics,
-    hasPersonalCoaching:  plan.hasPersonalCoaching,
-    hasNutritionTracking: plan.hasNutritionTracking,
-    hasOfflineAccess:     plan.hasOfflineAccess,
-    features:             Array.isArray(plan.features)
-                            ? plan.features as string[]
-                            : [],
-    displayOrder:         plan.displayOrder,
-    isPopular:            plan.isPopular,
+    id:                   plan?.id || '',
+    slug:                 plan?.slug || 'unknown',
+    name:                 plan?.name || 'Unknown Plan',
+    description:          plan?.description || null,
+    monthlyPriceCents:    plan?.monthlyPriceCents || 0,
+    yearlyPriceCents:     plan?.yearlyPriceCents || 0,
+    trialDays:            plan?.trialDays || 0,
+    maxWorkoutsPerMonth:  plan?.maxWorkoutsPerMonth ?? null,
+    maxPrograms:          plan?.maxPrograms ?? null,
+    hasAdvancedAnalytics: plan?.hasAdvancedAnalytics ?? false,
+    hasPersonalCoaching:  plan?.hasPersonalCoaching ?? false,
+    hasNutritionTracking: plan?.hasNutritionTracking ?? false,
+    hasOfflineAccess:     plan?.hasOfflineAccess ?? false,
+    features:             Array.isArray(plan?.features) 
+                            ? plan.features 
+                            : typeof plan?.features === 'string' 
+                              ? JSON.parse(plan.features) 
+                              : [],
+    displayOrder:         plan?.displayOrder || 0,
+    isPopular:            plan?.isPopular ?? false,
   };
 }
-
 async function logEvent(
   subscriptionId: string,
   event:          SubscriptionEvent,
@@ -148,7 +149,9 @@ export async function getCurrentSubscription(
     where:   { userId },
     orderBy: { createdAt: 'desc' },
     take:    10,
-    include: { plan: true },
+    include: { 
+      plan: true   // This can fail if relation mapping is broken
+    },
   });
 
   if (!rows.length) return null;
@@ -173,32 +176,61 @@ export async function getCurrentSubscription(
   });
 
   const sub = ranked[0];
+  if (!sub) return null;
+
+  // Defensive: handle missing plan relation
+  let publicPlan: PublicPlan;
+  if (sub.plan) {
+    publicPlan = toPublicPlan(sub.plan);
+  } else {
+    // Fallback: fetch plan separately if relation failed
+    const fallbackPlan = await prisma.plan.findUnique({
+      where: { id: sub.planId },
+    });
+    publicPlan = fallbackPlan ? toPublicPlan(fallbackPlan) : {
+      id: sub.planId,
+      slug: 'unknown',
+      name: 'Unknown Plan',
+      description: null,
+      monthlyPriceCents: 0,
+      yearlyPriceCents: 0,
+      trialDays: 0,
+      maxWorkoutsPerMonth: null,
+      maxPrograms: null,
+      hasAdvancedAnalytics: false,
+      hasPersonalCoaching: false,
+      hasNutritionTracking: false,
+      hasOfflineAccess: false,
+      features: [],
+      displayOrder: 0,
+      isPopular: false,
+    };
+  }
 
   let scheduledPlanSlug: string | null = null;
   if (sub.scheduledPlanId) {
     const sp = await prisma.plan.findUnique({
-      where:  { id: sub.scheduledPlanId },
+      where: { id: sub.scheduledPlanId },
       select: { slug: true },
     });
     scheduledPlanSlug = sp?.slug ?? null;
   }
 
-  // STR→PS-8: return Paystack subscription codes instead of stripeSubscriptionId
   return {
     id:                      sub.id,
     status:                  sub.status,
     interval:                sub.interval,
-    plan:                    toPublicPlan(sub.plan),
-    trialEndsAt:             sub.trialEndsAt?.toISOString()        ?? null,
+    plan:                    publicPlan,
+    trialEndsAt:             sub.trialEndsAt?.toISOString() ?? null,
     currentPeriodStart:      sub.currentPeriodStart?.toISOString() ?? null,
-    currentPeriodEnd:        sub.currentPeriodEnd?.toISOString()   ?? null,
-    cancelAtPeriodEnd:       sub.cancelAtPeriodEnd,
-    cancelledAt:             sub.cancelledAt?.toISOString()        ?? null,
+    currentPeriodEnd:        sub.currentPeriodEnd?.toISOString() ?? null,
+    cancelAtPeriodEnd:       sub.cancelAtPeriodEnd ?? false,
+    cancelledAt:             sub.cancelledAt?.toISOString() ?? null,
     scheduledPlanSlug,
-    activatedAt:             sub.activatedAt?.toISOString()        ?? null,
+    activatedAt:             sub.activatedAt?.toISOString() ?? null,
     daysUntilRenewal:        daysUntil(sub.currentPeriodEnd),
     paystackSubscriptionCode: sub.paystackSubscriptionCode ?? null,
-    paystackEmailToken:       sub.paystackEmailToken       ?? null,
+    paystackEmailToken:       sub.paystackEmailToken ?? null,
   };
 }
 
@@ -232,19 +264,24 @@ export async function createCheckoutSession(
   // Paystack plan codes enable automatic recurring billing on the Paystack side.
   // If not yet configured in the Paystack dashboard, fall back to a one-time
   // transaction charge — your webhook + cron handle renewals in that case.
+  // Paystack plan codes (for recurring)
+  
+  // Paystack plan codes (for recurring)
   const paystackPlanCode = interval === 'YEARLY'
     ? plan.paystackPlanCodeYearly
     : plan.paystackPlanCodeMonthly;
 
-  // Log a warning so you know to add the plan codes in the Paystack dashboard,
-  // but do NOT throw — the checkout can still proceed as a one-time charge.
   if (!paystackPlanCode) {
-    console.warn(
-      `[subscription] Paystack plan code not set for "${plan.slug}" / ${interval}. ` +
-      'Charging as one-time transaction. Add paystackPlanCodeMonthly / paystackPlanCodeYearly ' +
-      'in the Paystack dashboard and update the plans table to enable auto-recurring billing.',
-    );
+    console.warn(`[createCheckoutSession] No Paystack plan code for \( {plan.slug}/ \){interval}. Proceeding as one-time charge.`);
   }
+
+  const amount = interval === 'YEARLY' ? plan.yearlyPriceCents : plan.monthlyPriceCents;
+
+  const paystackCustomerCode = await getOrCreatePaystackCustomer(
+    prisma, userId, email, name,
+  );
+
+  
 
   // NEW-R4: Block if the user already has an active or trialing subscription
   // from ANY provider. Without this, a Paystack checkout could run while an
@@ -275,20 +312,19 @@ export async function createCheckoutSession(
   // Paystack transaction/initialize — the plan code makes it a recurring subscription
   const txn = await initializeTransaction({
     email,
-    amount:       interval === 'YEARLY' ? plan.yearlyPriceCents : plan.monthlyPriceCents,
-    currency:     'KES',
-    ...(paystackPlanCode ? { plan: paystackPlanCode } : {}),
+    amount,
+    currency: 'KES',
+    ...(paystackPlanCode && { plan: paystackPlanCode }),   // only add if present
     callback_url: resolvedSuccessUrl,
     metadata: {
       userId,
       planId,
       interval,
-      cancelUrl:              resolvedCancelUrl,
+      cancelUrl: resolvedCancelUrl,
       existingSubscriptionId: existing?.id ?? '',
       trialDays: plan.trialDays > 0 && !existing ? plan.trialDays : 0,
     },
   });
-  
 
   const pendingSub = await prisma.subscription.create({
     data: {
