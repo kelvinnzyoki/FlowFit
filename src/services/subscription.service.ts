@@ -1303,3 +1303,5 @@ export async function runReconciliation(): Promise<{
   console.log(`[reconcile] Done — checked=${checked} fixed=${fixed} errors=${errors}`);
   return { checked, fixed, errors };
 }
+}
+
