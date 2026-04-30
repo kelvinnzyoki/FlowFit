@@ -1157,6 +1157,7 @@ export async function getBillingPortalUrl(userId: string): Promise<string> {
   // Optionally append ?manage=1 so the frontend can auto-scroll to the
   // management section or show a "Welcome back" prompt.
   return `${frontendBase}/subscription?manage=1`;
+}
 
 
 // ─── Alias for subscription.routes.ts ────────────────────────────────────────
