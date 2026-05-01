@@ -45,7 +45,7 @@ import programRoutes      from './program.routes.js';
 import progressRoutes     from './progress.routes.js';
 import userRoutes         from './user.routes.js';
 import subscriptionRoutes from './subscription.routes.js';
-import seedRouter from './seed.routes.js';
+//import seedRouter from './seed.routes.js';
 import exerciseRoutes from './exercise.routes.js';
 import aiRoutes from './ai.routes.js';
 import workoutGeneratorRoutes from './ai.routes.js';   // or rename file to workoutGenerator.routes.ts
