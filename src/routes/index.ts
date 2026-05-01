@@ -82,7 +82,7 @@ router.use('/exercises', exerciseRoutes);
 router.use('/ai', aiRoutes);
 
 
-router.use('/admin', seedRouter);
+//router.use('/admin', seedRouter);
 
 
 export default router;
