@@ -80,6 +80,41 @@ router.get('/my-enrollments', async (req: Request, res: Response) => {
   }
 });
 
+// ─── GET /api/v1/programs/ai-generated ───────────────────────────────────────
+// Returns the current user's single AI-generated program with full exercise data.
+// Profile page calls this to display the saved plan without relying on localStorage.
+router.get('/ai-generated', async (req: Request, res: Response) => {
+  try {
+    const program = await prisma.program.findFirst({
+      where:   { userId: req.user!.id, type: 'ai_generated' },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        weeks: {
+          include: {
+            days: {
+              include: {
+                exercises: {
+                  orderBy: { orderIndex: 'asc' },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!program) {
+      res.status(404).json({ success: false, error: 'No AI program found.' });
+      return;
+    }
+
+    res.status(200).json({ success: true, data: program });
+  } catch (error) {
+    console.error('Get AI program error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch AI program.' });
+  }
+});
+
 // ─── POST /api/v1/programs ────────────────────────────────────────────────────
 // For type='ai_generated': upserts — replaces the user's existing AI program
 // so they always have exactly one. New exercises replace old ones entirely.
@@ -169,7 +204,18 @@ router.post('/', async (req: Request, res: Response) => {
 
         const updated = await prisma.program.findUnique({
           where:   { id: existing.id },
-          include: { _count: { select: { weeks: true, enrollments: true } } },
+          include: {
+            weeks: {
+              include: {
+                days: {
+                  include: {
+                    exercises: { orderBy: { orderIndex: 'asc' } },
+                  },
+                },
+              },
+            },
+            _count: { select: { weeks: true, enrollments: true } },
+          },
         });
         res.status(200).json({ success: true, data: updated });
         return;
@@ -214,17 +260,25 @@ router.post('/', async (req: Request, res: Response) => {
         difficulty,
         type,
         metadata:      metadata as any,
-        durationWeeks: type === 'ai_generated' ? 1 : 1,  // default 1 week for all types
-        daysPerWeek:   type === 'ai_generated' ? 1 : 1,  // default 1 day/week for all types
+        durationWeeks: 1,
+        daysPerWeek:   1,
         isActive:      true,
         isPublic:      false,
         ...(weeksCreate ? { weeks: weeksCreate } : {}),
       },
       include: {
+        weeks: {
+          include: {
+            days: {
+              include: {
+                exercises: { orderBy: { orderIndex: 'asc' } },
+              },
+            },
+          },
+        },
         _count: { select: { weeks: true, enrollments: true } },
       },
     });
-
     res.status(201).json({ success: true, data: program });
   } catch (error) {
     console.error('Create program error:', error);
