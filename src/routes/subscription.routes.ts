@@ -284,6 +284,110 @@ router.get(
   },
 );
 
+// ─── GET /subscriptions/paystack/fetch-codes ─────────────────────────────────
+//
+// Polls Paystack for subscription_code + email_token for the user's active
+// subscription when the webhook hasn't fired yet. Frontend calls this 30s
+// after verify if paystackSubscriptionCode is still null in the response.
+router.get(
+  '/paystack/fetch-codes',
+  requireAuth,
+  rateLimit({ windowMs: 60 * 1000, max: 5 }),
+  async (req: Request, res: Response) => {
+    const userId = req.user!.id;
+    try {
+      const sub = await prisma.subscription.findFirst({
+        where:   { userId, status: { in: ['ACTIVE', 'TRIALING'] }, provider: 'PAYSTACK' },
+        orderBy: { createdAt: 'desc' },
+        select:  {
+          id:                      true,
+          paystackSubscriptionCode: true,
+          paystackEmailToken:       true,
+          paystackCustomerCode:     true,
+          planId:                   true,
+          interval:                 true,
+        },
+      });
+
+      if (!sub) {
+        res.status(404).json({ success: false, error: 'No active Paystack subscription found' });
+        return;
+      }
+
+      // Already stored — return immediately
+      if (sub.paystackSubscriptionCode) {
+        res.json({
+          success:                  true,
+          paystackSubscriptionCode: sub.paystackSubscriptionCode,
+          paystackEmailToken:       sub.paystackEmailToken,
+        });
+        return;
+      }
+
+      // Try fetching from Paystack
+      const { findPaystackSubscriptionByCustomer, createPaystackSubscription } =
+        await import('../services/paystack.service.js');
+
+      let code: string | null  = null;
+      let token: string | null = null;
+
+      // Strategy A: look up by customer code
+      if (sub.paystackCustomerCode) {
+        const found = await findPaystackSubscriptionByCustomer(sub.paystackCustomerCode).catch(() => null);
+        if (found?.subscription_code) {
+          code  = found.subscription_code;
+          token = found.email_token ?? null;
+        }
+      }
+
+      // Strategy B: create subscription programmatically
+      if (!code && sub.paystackCustomerCode && sub.planId) {
+        const plan = await prisma.plan.findUnique({
+          where:  { id: sub.planId },
+          select: { paystackPlanCodeMonthly: true, paystackPlanCodeYearly: true },
+        });
+        const planCode = sub.interval === 'YEARLY'
+          ? plan?.paystackPlanCodeYearly
+          : plan?.paystackPlanCodeMonthly;
+
+        if (planCode) {
+          const created = await createPaystackSubscription(
+            sub.paystackCustomerCode,
+            planCode,
+          ).catch(() => null);
+          if (created?.subscription_code) {
+            code  = created.subscription_code;
+            token = created.email_token ?? null;
+          }
+        }
+      }
+
+      if (code) {
+        await prisma.subscription.update({
+          where: { id: sub.id },
+          data: {
+            paystackSubscriptionCode: code,
+            ...(token ? { paystackEmailToken: token } : {}),
+          },
+        });
+      }
+
+      res.json({
+        success:                  true,
+        paystackSubscriptionCode: code,
+        paystackEmailToken:       token,
+        fetched:                  !!code,
+        message: code
+          ? 'Subscription codes stored successfully.'
+          : 'Codes not yet available — the subscription.create webhook will store them shortly.',
+      });
+    } catch (err: any) {
+      console.error('[fetch-codes]', err?.message);
+      res.status(500).json({ success: false, error: 'Failed to fetch subscription codes' });
+    }
+  },
+);
+
 // ─── POST /subscriptions/trial ───────────────────────────────────────────────
 router.post(
   '/trial',
@@ -714,7 +818,7 @@ router.get('/billing-portal', requireAuth, billingLimiter, async (req: Request, 
   const appUrl = (process.env.FRONTEND_URL || process.env.APP_URL || '').replace(/\/$/, '');
   res.json({
     success: true,
-    url:     `${appUrl}/subscription.html`,
+    url:     `${appUrl}/subscription`,
     note:    'Manage your subscription directly in the app.',
   });
 });
