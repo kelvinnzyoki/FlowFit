@@ -353,8 +353,11 @@ class AICoachService {
     if (enrollment) {
       const { currentWeek, currentDay, completedDays } = enrollment;
       const totalDays = enrollment.program.durationWeeks * enrollment.program.daysPerWeek;
-      const weekData = enrollment.program.weeks.find(w => w.weekNumber === currentWeek);
-      const dayData  = weekData?.days.find(d => d.dayNumber === currentDay);
+      const weekData        = enrollment.program.weeks.find(w => w.weekNumber === currentWeek);
+      const dayData         = weekData?.days?.find(d => d.dayNumber === currentDay);
+      const nextExercises   = dayData?.exercises
+        ?.map(de => de.exercise?.name ?? de.exerciseName ?? 'Exercise')
+        .filter(Boolean) ?? [];
       program = {
         name:          enrollment.program.name,
         durationWeeks: enrollment.program.durationWeeks,
@@ -872,11 +875,13 @@ Never invent data. Always reference real numbers from context. "response" is alw
   }
 
   const scheduleLines = days.map(d => {
-    const exs = d.exercises.map(de => de.exercise?.name ?? de.exerciseName ?? '?').join(' · ');
-    const isToday = d.dayNumber === ctx.program!.currentDay;
-    
-    const marker = isToday ? ' ← TODAY' : '';
-    return `Day ${d.dayNumber}${marker}: ${exs}`;
+    const dayLabel = d.isRestDay
+      ? 'Rest Day'
+      : d.exercises.map(de => de.exercise?.name ?? de.exerciseName ?? '?').join(' · ');
+    const isToday  = d.dayNumber === ctx.program!.currentDay;
+    const marker   = isToday ? ' ← TODAY' : '';
+    const dayName  = d.name ? ` — ${d.name}` : '';
+    return `Day ${d.dayNumber}${dayName}${marker}: ${dayLabel}`;
   }).join('\n');
 
   const reply = `**${ctx.program.name}** — Week ${ctx.program.currentWeek}\n\n${scheduleLines}\n\n${ctx.program.completedDays}/${ctx.program.totalDays} sessions complete · ${ctx.program.pctComplete}% done`;
