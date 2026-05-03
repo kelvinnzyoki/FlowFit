@@ -492,7 +492,7 @@ model Week {
   program     Program      @relation(fields: [programId], references: [id], onDelete: Cascade)
   days        Day[]
 
-  @@map("program_weeks")
+  @@map("weeks")
 }
 
 model Day {
@@ -504,7 +504,7 @@ model Day {
   week        Week          @relation(fields: [weekId], references: [id], onDelete: Cascade)
   exercises   DayExercise[]
 
-  @@map("program_days")
+  @@map("days")
 }
 
 model DayExercise {
@@ -522,7 +522,7 @@ model DayExercise {
 
   @@index([dayId])
   @@index([exerciseId])
-  @@map("program_day_exercises")
+  @@map("day_exercises")
 }
 
 model Exercise {
