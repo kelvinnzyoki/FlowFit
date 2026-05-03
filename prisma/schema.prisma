@@ -486,7 +486,7 @@ model Program {
 model Week {
   id          String       @id @default(uuid())
   weekNumber  Int
-  title       String?
+  name       String?
   description String?
   programId   String
   program     Program      @relation(fields: [programId], references: [id], onDelete: Cascade)
@@ -498,7 +498,7 @@ model Week {
 model Day {
   id          String               @id @default(uuid())
   dayNumber   Int
-  title       String?
+  name       String?
   isRestDay   Boolean              @default(false)
   weekId      String
   week        Week          @relation(fields: [weekId], references: [id], onDelete: Cascade)
