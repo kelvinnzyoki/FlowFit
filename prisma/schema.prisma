@@ -483,7 +483,7 @@ model Program {
   @@map("programs")
 }
 
-model ProgramWeek {
+model Week {
   id          String       @id @default(uuid())
   weekNumber  Int
   title       String?
@@ -495,7 +495,7 @@ model ProgramWeek {
   @@map("program_weeks")
 }
 
-model ProgramDay {
+model Day {
   id          String               @id @default(uuid())
   dayNumber   Int
   title       String?
@@ -507,7 +507,7 @@ model ProgramDay {
   @@map("program_days")
 }
 
-model ProgramDayExercise {
+model DayExercise {
   id           String      @id @default(uuid())
   orderIndex   Int         @default(0)
   exerciseName String?     // name for AI-generated exercises with no library match
