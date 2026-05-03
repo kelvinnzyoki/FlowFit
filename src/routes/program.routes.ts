@@ -176,12 +176,12 @@ router.post('/', async (req: Request, res: Response) => {
               weeks: exercises.length > 0 ? {
                 create: [{
                   weekNumber:  1,
-                  title:       'Week 1',
+                  name:       'Week 1',
                   description: 'AI-generated workout',
                   days: {
                     create: [{
                       dayNumber: 1,
-                      title:     name.trim(),
+                      name:     name.trim(),
                       isRestDay: false,
                       exercises: {
                         create: exercises.map((ex: any, idx: number) => ({
@@ -227,12 +227,12 @@ router.post('/', async (req: Request, res: Response) => {
       ? {
           create: [{
             weekNumber:  1,
-            title:       'Week 1',
+            name:       'Week 1',
             description: 'AI-generated workout',
             days: {
               create: [{
                 dayNumber:  1,
-                title:      name.trim(),
+                name:      name.trim(),
                 isRestDay:  false,
                 exercises: {
                   create: exercises.map((ex: any, idx: number) => ({
@@ -357,12 +357,12 @@ router.patch('/:id', async (req: Request, res: Response) => {
             weeks: {
               create: [{
                 weekNumber:  1,
-                title:       'Week 1',
+                name:       'Week 1',
                 description: 'AI-generated workout',
                 days: {
                   create: [{
                     dayNumber: 1,
-                    title:     name?.trim() ?? 'AI Generated Workout',
+                    name:     name?.trim() ?? 'AI Generated Workout',
                     isRestDay: false,
                     exercises: {
                       create: exercises.map((ex: any, idx: number) => ({
