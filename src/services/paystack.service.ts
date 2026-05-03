@@ -49,6 +49,8 @@ export interface PaystackCustomer {
   last_name:     string | null;
 }
 
+
+
 export interface PaystackSubscription {
   id:                number;
   subscription_code: string;
@@ -70,6 +72,13 @@ export interface PaystackSubscription {
   next_payment_date: string | null;
   createdAt:         string;
   updatedAt:         string;
+}
+
+export interface PaystackSubscriptionCreate {
+  subscription_code: string;
+  email_token:       string;
+  status:            string;
+  next_payment_date: string | null;
 }
 
 // [PS-1] Return shape for transaction/initialize
@@ -281,7 +290,7 @@ export async function createPaystackCheckout(
 
   const appBase = (process.env.FRONTEND_URL || process.env.APP_URL || '').replace(/\/$/, '');
   const resolvedCallback = callbackUrl
-    ?? (appBase ? `${appBase}/subscription.html?success=1` : undefined);
+    ?? (appBase ? `${appBase}/subscription?success=1&ref=${reference}` : undefined);
 
   const txPayload: Record<string, unknown> = {
     email,
@@ -314,6 +323,64 @@ export async function createPaystackCheckout(
 
   const txn = await initializeTransaction(txPayload as any);
   return { ...txn, subscriptionId: subRow.id };
+}
+
+/**
+ * Programmatically create a Paystack Subscription after a one-time payment.
+ *
+ * WHY THIS EXISTS:
+ * When paystackPlanCodeMonthly/Yearly is set in the Plan, Paystack automatically
+ * creates a Subscription when `plan` is passed to /transaction/initialize.
+ * subscription.create webhook fires and we get subscription_code + email_token.
+ *
+ * When plan_code is NOT set (fallback one-time charge), no Subscription is
+ * created on Paystack's side. This function fills that gap — it calls
+ * POST /subscription to create the Subscription manually, then stores the
+ * resulting subscription_code and email_token in our DB.
+ *
+ * Without this, cancellation, reactivation, and the billing portal all fail
+ * because they all require subscription_code + email_token.
+ */
+export async function createPaystackSubscription(
+  customerCode: string,
+  planCode:     string,
+  startDate?:   Date,
+): Promise<PaystackSubscriptionCreate> {
+  const body: Record<string, unknown> = {
+    customer: customerCode,
+    plan:     planCode,
+  };
+  if (startDate) {
+    body.start_date = startDate.toISOString();
+  }
+  return paystackRequest<PaystackSubscriptionCreate>('POST', '/subscription', body);
+}
+
+/**
+ * Given a customer code, find the most recent Paystack subscription across
+ * all plans for that customer. Used as a fallback to discover subscription_code
+ * when the webhook hasn't fired yet or when plan_code was set after checkout.
+ */
+export async function findPaystackSubscriptionByCustomer(
+  customerCode: string,
+): Promise<PaystackSubscriptionCreate | null> {
+  try {
+    const subs = await paystackRequest<{ data: any[] }>(
+      'GET',
+      `/subscription?customer=${encodeURIComponent(customerCode)}&perPage=1&page=1`,
+    ) as any;
+    const list: any[] = Array.isArray(subs) ? subs : (subs?.data ?? []);
+    if (!list.length) return null;
+    const s = list[0];
+    return {
+      subscription_code: s.subscription_code,
+      email_token:       s.email_token,
+      status:            s.status,
+      next_payment_date: s.next_payment_date ?? null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -404,18 +471,11 @@ export async function verifyPaystackPayment(
         currentPeriodEnd:   nextPaymentDate,
         activatedAt:        now,
         cancelAtPeriodEnd:  false,
-        // FIX: Only write subscription codes when Paystack actually returned them.
-        // /transaction/verify often omits subscription.subscription_code and
-        // email_token — especially when called immediately after redirect before
-        // Paystack has fully linked the subscription. Writing null here would
-        // overwrite values already stored by the subscription.create webhook.
-        // Use undefined (not null) so Prisma skips the field entirely when absent.
         ...(subscriptionCode ? { paystackSubscriptionCode: subscriptionCode } : {}),
         ...(emailToken       ? { paystackEmailToken:       emailToken       } : {}),
       },
     });
 
-    // Only create a Payment record if one doesn't exist for this reference
     const existingPayment = await tx.payment.findFirst({
       where: { paystackReference: reference },
     });
@@ -444,8 +504,87 @@ export async function verifyPaystackPayment(
     });
   });
 
+  // ── Post-activation: ensure subscription_code + email_token are stored ──────
+  // /transaction/verify often omits subscription data, especially when called
+  // immediately after redirect. Try three escalating strategies to get the codes.
+  if (!subscriptionCode) {
+    const updatedSub = await prisma.subscription.findUnique({
+      where:  { id: sub!.id },
+      select: { paystackSubscriptionCode: true, paystackCustomerCode: true, planId: true },
+    });
+
+    // Only attempt if codes are still missing after the transaction
+    if (!updatedSub?.paystackSubscriptionCode) {
+      let fetchedCode:  string | null = null;
+      let fetchedToken: string | null = null;
+      let fetchedNextDate: Date | null = null;
+
+      // Strategy A: fetch from Paystack by customer code (most reliable)
+      if (updatedSub?.paystackCustomerCode) {
+        try {
+          const found = await findPaystackSubscriptionByCustomer(updatedSub.paystackCustomerCode);
+          if (found?.subscription_code) {
+            fetchedCode     = found.subscription_code;
+            fetchedToken    = found.email_token ?? null;
+            fetchedNextDate = found.next_payment_date ? new Date(found.next_payment_date) : null;
+          }
+        } catch (e) {
+          console.warn('[verifyPaystackPayment] Strategy A (customer lookup) failed:', e);
+        }
+      }
+
+      // Strategy B: create a Paystack Subscription programmatically using plan_code
+      // Only works when paystackPlanCodeMonthly/Yearly is set on the Plan
+      if (!fetchedCode && updatedSub?.planId) {
+        try {
+          const plan = await prisma.plan.findUnique({
+            where:  { id: updatedSub.planId },
+            select: {
+              paystackPlanCodeMonthly: true,
+              paystackPlanCodeYearly:  true,
+            },
+          });
+          const planInterval = (sub!.interval ?? 'MONTHLY') as BillingInterval;
+          const planCode     = planInterval === 'YEARLY'
+            ? plan?.paystackPlanCodeYearly
+            : plan?.paystackPlanCodeMonthly;
+
+          if (planCode && updatedSub?.paystackCustomerCode) {
+            const created = await createPaystackSubscription(
+              updatedSub.paystackCustomerCode,
+              planCode,
+              nextPaymentDate,
+            );
+            fetchedCode     = created.subscription_code;
+            fetchedToken    = created.email_token ?? null;
+            fetchedNextDate = created.next_payment_date ? new Date(created.next_payment_date) : null;
+          }
+        } catch (e) {
+          console.warn('[verifyPaystackPayment] Strategy B (create subscription) failed:', e);
+        }
+      }
+
+      // Persist whatever we found
+      if (fetchedCode) {
+        await prisma.subscription.update({
+          where: { id: sub!.id },
+          data: {
+            paystackSubscriptionCode: fetchedCode,
+            ...(fetchedToken    ? { paystackEmailToken:  fetchedToken    } : {}),
+            ...(fetchedNextDate ? { currentPeriodEnd:    fetchedNextDate } : {}),
+          },
+        });
+        console.log(`[verifyPaystackPayment] Stored subscription code ${fetchedCode} via post-activation fetch`);
+      } else {
+        console.warn(
+          `[verifyPaystackPayment] Could not retrieve subscription_code for sub ${sub!.id}. ` +
+          'It will be stored when the subscription.create webhook fires (usually within 30s).',
+        );
+      }
+    }
+  }
+
   return { success: true, status: 'success', subscription: await fetchCurrentSub(userId) };
-}
 
 // FIX-V2: Inline fetchCurrentSub to avoid circular import.
 // subscription.service.ts imports from paystack.service.ts, so lazily importing
