@@ -476,7 +476,7 @@ model Program {
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
   enrollments   ProgramEnrollment[]
-  weeks         ProgramWeek[]
+  weeks         Week[]
 
   @@index([userId])
   @@index([type])
@@ -490,7 +490,7 @@ model Week {
   description String?
   programId   String
   program     Program      @relation(fields: [programId], references: [id], onDelete: Cascade)
-  days        ProgramDay[]
+  days        Day[]
 
   @@map("program_weeks")
 }
@@ -501,8 +501,8 @@ model Day {
   title       String?
   isRestDay   Boolean              @default(false)
   weekId      String
-  week        ProgramWeek          @relation(fields: [weekId], references: [id], onDelete: Cascade)
-  exercises   ProgramDayExercise[]
+  week        Week          @relation(fields: [weekId], references: [id], onDelete: Cascade)
+  exercises   DayExercise[]
 
   @@map("program_days")
 }
@@ -517,7 +517,7 @@ model DayExercise {
   notes        String?
   dayId        String
   exerciseId   String?     // nullable — AI exercises may not map to a library Exercise
-  day          ProgramDay  @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  day          Day  @relation(fields: [dayId], references: [id], onDelete: Cascade)
   exercise     Exercise?   @relation(fields: [exerciseId], references: [id], onDelete: SetNull)
 
   @@index([dayId])
@@ -534,7 +534,7 @@ model Exercise {
   isActive       Boolean       @default(true)
   createdAt      DateTime      @default(now())
   logs           WorkoutLog[]
-  dayExercises   ProgramDayExercise[]
+  dayExercises   DayExercise[]
 
   @@map("exercises")
 }
