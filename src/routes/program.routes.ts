@@ -147,21 +147,21 @@ router.post('/', async (req: Request, res: Response) => {
       if (existing) {
         // Delete the old nested structure then update in a single transaction
         await prisma.$transaction(async (tx) => {
-          const weeks = await tx.programWeek.findMany({
+          const weeks = await tx.Week.findMany({
             where:  { programId: existing.id },
             select: { id: true },
           });
           for (const week of weeks) {
-            const days = await tx.programDay.findMany({
+            const days = await tx.Day.findMany({
               where:  { weekId: week.id },
               select: { id: true },
             });
             for (const day of days) {
-              await tx.programDayExercise.deleteMany({ where: { dayId: day.id } });
+              await tx.DayExercise.deleteMany({ where: { dayId: day.id } });
             }
-            await tx.programDay.deleteMany({ where: { weekId: week.id } });
+            await tx.Day.deleteMany({ where: { weekId: week.id } });
           }
-          await tx.programWeek.deleteMany({ where: { programId: existing.id } });
+          await tx.Week.deleteMany({ where: { programId: existing.id } });
 
           await tx.program.update({
             where: { id: existing.id },
@@ -326,21 +326,21 @@ router.patch('/:id', async (req: Request, res: Response) => {
     if ((type ?? existing.type) === 'ai_generated' && exercises.length > 0) {
       await prisma.$transaction(async (tx) => {
         // Delete existing nested structure
-        const weeks = await tx.programWeek.findMany({
+        const weeks = await tx.Week.findMany({
           where:   { programId },
           select:  { id: true },
         });
         for (const week of weeks) {
-          const days = await tx.programDay.findMany({
+          const days = await tx.Day.findMany({
             where:  { weekId: week.id },
             select: { id: true },
           });
           for (const day of days) {
-            await tx.programDayExercise.deleteMany({ where: { dayId: day.id } });
+            await tx.DayExercise.deleteMany({ where: { dayId: day.id } });
           }
-          await tx.programDay.deleteMany({ where: { weekId: week.id } });
+          await tx.Day.deleteMany({ where: { weekId: week.id } });
         }
-        await tx.programWeek.deleteMany({ where: { programId } });
+        await tx.Week.deleteMany({ where: { programId } });
 
         // Recreate with the new exercises — always reset to 1 week / 1 day for AI plans
         await tx.program.update({
