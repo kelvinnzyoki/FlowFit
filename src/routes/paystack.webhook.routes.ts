@@ -120,6 +120,13 @@ async function processEvent(event: PaystackWebhookEvent): Promise<void> {
         // Use the userId/planId from the INCOMPLETE row we found
       }
 
+      const effectivePlanId = planId ?? existing?.planId;
+
+if (!effectivePlanId) {
+  console.warn('[Webhook] Missing planId');
+  return;
+}
+
       await prisma.$transaction(async (tx) => {
         if (existing && (existing.status === 'INCOMPLETE' || existing.status === 'TRIALING')) {
         const subscriptionCode = data.subscription?.subscription_code || data.subscription_code;
