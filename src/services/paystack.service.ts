@@ -461,6 +461,9 @@ export async function verifyPaystackPayment(
     }
   }
 
+  // === CRITICAL FIX: Force save codes from txn ===
+  console.log(`[verifyPaystackPayment] Extracted codes for sub ${sub!.id}:`, { subscriptionCode, emailToken });
+
   await prisma.$transaction(async (tx) => {
     await tx.subscription.update({
       where: { id: sub!.id },
@@ -471,6 +474,8 @@ export async function verifyPaystackPayment(
         currentPeriodEnd:   nextPaymentDate,
         activatedAt:        now,
         cancelAtPeriodEnd:  false,
+        paystackSubscriptionCode: subscriptionCode || undefined,
+        paystackEmailToken:       emailToken       || undefined,
         ...(subscriptionCode ? { paystackSubscriptionCode: subscriptionCode } : {}),
         ...(emailToken       ? { paystackEmailToken:       emailToken       } : {}),
       },
