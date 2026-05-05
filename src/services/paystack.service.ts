@@ -322,6 +322,12 @@ export async function createPaystackCheckout(
   }
 
   const txn = await initializeTransaction(txPayload as any);
+  
+  console.log(`[createPaystackCheckout] Transaction initialized:`, {
+  reference: txn.reference,
+  hasPlan: !!txPayload.plan
+});
+  
   return { ...txn, subscriptionId: subRow.id };
 }
 
