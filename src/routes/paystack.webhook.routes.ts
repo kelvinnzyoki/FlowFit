@@ -120,37 +120,40 @@ async function processEvent(event: PaystackWebhookEvent): Promise<void> {
         // Use the userId/planId from the INCOMPLETE row we found
       }
 
-      const effectivePlanId = planId ?? existing?.planId;
-
-if (!effectivePlanId) {
-  console.warn('[Webhook] Missing planId');
-  return;
-}
-
+      
       await prisma.$transaction(async (tx) => {
         if (existing && (existing.status === 'INCOMPLETE' || existing.status === 'TRIALING')) {
-        const subscriptionCode = data.subscription?.subscription_code || data.subscription_code;
-        const emailToken       = data.subscription?.email_token       || data.email_token;
+          // FIX: Ensure codes are saved + fix effectivePlanId scope
+          const subscriptionCode = data.subscription?.subscription_code 
+                                || data.subscription_code 
+                                || existing.paystackSubscriptionCode;
 
-        console.log(`[Webhook charge.success] Saving codes for ${existing.id}:`, { subscriptionCode, emailToken });
+          const emailToken = data.subscription?.email_token 
+                          || data.email_token 
+                          || existing.paystackEmailToken;
 
-        await tx.subscription.update({
-          where: { id: existing.id },
-          data: {
-            status:                   'ACTIVE',
-            provider:                 'PAYSTACK',
-            interval,
-            planId:                   effectivePlanId,
-            paystackSubscriptionCode: subscriptionCode || existing.paystackSubscriptionCode,
-            paystackEmailToken:       emailToken       || existing.paystackEmailToken,
-            paystackReference:        reference,
-            currentPeriodStart:       now,
-            currentPeriodEnd:         nextPaymentDate,
-            activatedAt:              now,
-            cancelAtPeriodEnd:        false,
-          },
-        });
+          console.log(`[Webhook] charge.success - Saving codes for sub ${existing.id}`, { 
+            subscriptionCode, emailToken 
+          });
 
+          const effectivePlanId = planId ?? existing.planId;
+
+          await tx.subscription.update({
+            where: { id: existing.id },
+            data: {
+              status:                   'ACTIVE',
+              provider:                 'PAYSTACK',
+              interval,
+              planId:                   effectivePlanId,
+              paystackSubscriptionCode: subscriptionCode,
+              paystackEmailToken:       emailToken,
+              paystackReference:        reference,
+              currentPeriodStart:       now,
+              currentPeriodEnd:         nextPaymentDate,
+              activatedAt:              now,
+              cancelAtPeriodEnd:        false,
+            },
+          });
           await tx.payment.create({
             data: {
               subscriptionId:    existing.id,
