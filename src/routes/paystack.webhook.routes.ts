@@ -367,7 +367,7 @@ async function processEvent(event: PaystackWebhookEvent): Promise<void> {
       // Lookup strategy 0 (NEW — most reliable): match by paystackReference stored
       // on the INCOMPLETE row. The invoice transaction field is the reference we set
       // in createCheckoutSession (format: ff_<userId12>_<timestamp>).
-      let dbSub: typeof (await prisma.subscription.findFirst({ where: { id: '' } })) = null;
+      let dbSub: Awaited<ReturnType<typeof prisma.subscription.findFirst>> = null;
 
       if (invoiceTxRef) {
         dbSub = await prisma.subscription.findFirst({
