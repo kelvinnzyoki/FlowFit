@@ -122,24 +122,27 @@ async function processEvent(event: PaystackWebhookEvent): Promise<void> {
 
       await prisma.$transaction(async (tx) => {
         if (existing && (existing.status === 'INCOMPLETE' || existing.status === 'TRIALING')) {
-          // ── First payment: activate the INCOMPLETE / free-trial row ───────────
-          const effectivePlanId = planId ?? existing.planId;
-          await tx.subscription.update({
-            where: { id: existing.id },
-            data: {
-              status:                   'ACTIVE',
-              provider:                 'PAYSTACK',
-              interval,
-              planId:                   effectivePlanId,
-              paystackSubscriptionCode: subscriptionCode  ?? existing.paystackSubscriptionCode ?? null,
-              paystackEmailToken:       emailToken        ?? existing.paystackEmailToken       ?? null,
-              paystackReference:        reference,
-              currentPeriodStart:       now,
-              currentPeriodEnd:         nextPaymentDate,
-              activatedAt:              now,
-              cancelAtPeriodEnd:        false,
-            },
-          });
+        const subscriptionCode = data.subscription?.subscription_code || data.subscription_code;
+        const emailToken       = data.subscription?.email_token       || data.email_token;
+
+        console.log(`[Webhook charge.success] Saving codes for ${existing.id}:`, { subscriptionCode, emailToken });
+
+        await tx.subscription.update({
+          where: { id: existing.id },
+          data: {
+            status:                   'ACTIVE',
+            provider:                 'PAYSTACK',
+            interval,
+            planId:                   effectivePlanId,
+            paystackSubscriptionCode: subscriptionCode || existing.paystackSubscriptionCode,
+            paystackEmailToken:       emailToken       || existing.paystackEmailToken,
+            paystackReference:        reference,
+            currentPeriodStart:       now,
+            currentPeriodEnd:         nextPaymentDate,
+            activatedAt:              now,
+            cancelAtPeriodEnd:        false,
+          },
+        });
 
           await tx.payment.create({
             data: {
@@ -365,8 +368,8 @@ async function processEvent(event: PaystackWebhookEvent): Promise<void> {
       await prisma.subscription.update({
         where: { id: dbSub.id },
         data: {
-          paystackSubscriptionCode: subCode,
-          paystackEmailToken:       emailToken ?? dbSub.paystackEmailToken,
+          paystackSubscriptionCode: subCode || dbSub.paystackSubscriptionCode,
+          paystackEmailToken:       emailToken || dbSub.paystackEmailToken,
         },
       });
 
