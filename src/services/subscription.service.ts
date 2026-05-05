@@ -284,25 +284,12 @@ export async function createCheckoutSession(
     prisma, userId, email, name
   );
 
-  const txn = await initializeTransaction({
-    email,
-    amount,                         // KES cents (mpesaMonthlyKes * 100)
-    currency: 'KES',
-    plan:     paystackPlanCode,     // always set — threw above if missing
-    channels: ['card'],             // explicit: only card on Paystack checkout
-    callback_url: resolvedSuccessUrl,
-    metadata: {
-      userId,
-      planId,
-      interval,
-      // BUG-FIX [SS-CANCELURL]: Paystack has no cancelUrl concept — only a
-      // single callback_url. Removed cancelUrl from metadata (it was ignored).
-      existingSubscriptionId: existing?.id ?? '',
-      trialDays: plan.trialDays > 0 && !existing ? plan.trialDays : 0,
-      planSlug:  plan.slug,
-    },
-  });
-
+  // FIX-CODES-1: Create the INCOMPLETE row BEFORE calling initializeTransaction
+  // so we can embed subscriptionId in the Paystack metadata. This is the most
+  // reliable way for the charge.success and subscription.create webhooks to find
+  // the right DB row — even when email lookup or reference matching fails.
+  // Previously the row was created AFTER txn init, making subscriptionId unavailable
+  // in metadata, which meant the webhook had to rely on brittle email/reference lookups.
   const pendingSub = await prisma.subscription.create({
     data: {
       userId,
@@ -310,13 +297,45 @@ export async function createCheckoutSession(
       status: 'INCOMPLETE',
       interval,
       provider: 'PAYSTACK',
-      paystackReference: txn.reference,
       paystackCustomerCode,
       trialStartedAt: plan.trialDays > 0 && !existing ? new Date() : null,
       trialEndsAt: plan.trialDays > 0 && !existing
         ? new Date(Date.now() + plan.trialDays * 86_400_000)
         : null,
     },
+  });
+
+  let txn: Awaited<ReturnType<typeof initializeTransaction>>;
+  try {
+    txn = await initializeTransaction({
+      email,
+      amount,                         // KES cents (mpesaMonthlyKes * 100)
+      currency: 'KES',
+      plan:     paystackPlanCode,     // always set — threw above if missing
+      channels: ['card'],             // explicit: only card on Paystack checkout
+      callback_url: resolvedSuccessUrl,
+      metadata: {
+        userId,
+        planId,
+        interval,
+        // FIX-CODES-1: subscriptionId is now included so webhooks can do a
+        // direct DB lookup by ID — the most reliable lookup strategy available.
+        subscriptionId:         pendingSub.id,
+        existingSubscriptionId: existing?.id ?? '',
+        trialDays: plan.trialDays > 0 && !existing ? plan.trialDays : 0,
+        planSlug:  plan.slug,
+      },
+    });
+  } catch (initErr) {
+    // Roll back the INCOMPLETE row so it doesn't litter the DB if Paystack rejects the init.
+    await prisma.subscription.delete({ where: { id: pendingSub.id } }).catch(() => {});
+    throw initErr;
+  }
+
+  // Backfill the reference now that we have it from Paystack.
+  await prisma.subscription.update({
+    where: { id: pendingSub.id },
+    data:  { paystackReference: txn.reference },
   });
 
   await logEvent(pendingSub.id, 'CREATED', null, 'INCOMPLETE', {
@@ -596,11 +615,10 @@ export async function handleMpesaFailure(
       });
     }
   });
-}
+  
+  // ─── Cron job functions ───────────────────────────────────────────────────────
 
-// ─── Cron job functions ───────────────────────────────────────────────────────
-// (unchanged from v5)
-
+ 
 export async function runRenewalReminders(): Promise<{
   processed: number;
   errors:    number;
@@ -608,7 +626,7 @@ export async function runRenewalReminders(): Promise<{
   const REMINDER_DAYS  = 3;
   const now            = new Date();
   const reminderWindow = new Date(now.getTime() + REMINDER_DAYS * 86_400_000);
-
+ 
   const subs = await prisma.subscription.findMany({
     where: {
       provider:         'MPESA',
@@ -618,10 +636,11 @@ export async function runRenewalReminders(): Promise<{
     },
     include: { plan: true },
   });
+}
 
   let processed = 0;
   let errors    = 0;
-
+ 
   for (const sub of subs) {
     try {
       await prisma.$transaction(async (db) => {
@@ -642,6 +661,8 @@ export async function runRenewalReminders(): Promise<{
           },
         });
       });
+
+
       // TODO: send email/SMS notification to sub.userId
       processed++;
     } catch (err) {
@@ -649,10 +670,10 @@ export async function runRenewalReminders(): Promise<{
       errors++;
     }
   }
-
+ 
   return { processed, errors };
 }
-
+ 
 export async function runMpesaRenewals(): Promise<{
   processed: number;
   errors:    number;
@@ -662,6 +683,7 @@ export async function runMpesaRenewals(): Promise<{
   const windowEnd            = new Date(now.getTime() + RENEWAL_WINDOW_HOURS * 3_600_000);
   const renewalCutoff        = new Date(now.getTime() - 23 * 3_600_000);
 
+  
   const subs = await prisma.subscription.findMany({
     where: {
       provider:         'MPESA',
@@ -675,10 +697,10 @@ export async function runMpesaRenewals(): Promise<{
     },
     include: { plan: true, user: true },
   });
-
+ 
   let processed = 0;
   let errors    = 0;
-
+ 
   for (const sub of subs) {
     try {
       const phone = sub.user.mpesaPhone;
@@ -690,19 +712,19 @@ export async function runMpesaRenewals(): Promise<{
       const amountKes = sub.interval === 'YEARLY'
         ? sub.plan.mpesaYearlyKes
         : sub.plan.mpesaMonthlyKes;
-
+ 
       if (!amountKes) {
         console.warn(`[cron/renewals] Sub ${sub.id}: no KES price for ${sub.plan.slug}`);
         continue;
       }
-
+ 
       const stk = await initiateStkPush(
         phone,
         amountKes,
         `FlowFit-${sub.plan.slug.toUpperCase()}`,
         `FlowFit renewal ${sub.plan.name}`,
       );
-
+ 
       const attempts = (sub.mpesaRenewalAttempts ?? 0) + 1;
 
       await prisma.$transaction(async (db) => {
@@ -741,24 +763,23 @@ export async function runMpesaRenewals(): Promise<{
           },
         });
       });
-
+ 
       processed++;
     } catch (err) {
       console.error(`[cron/renewals] Sub ${sub.id}:`, err);
       errors++;
     }
   }
-
   return { processed, errors };
 }
-
+ 
 export async function runRetries(): Promise<{
   processed: number;
   errors:    number;
 }> {
   const MAX_RETRIES = 3;
   const now         = new Date();
-
+ 
   const subs = await prisma.subscription.findMany({
     where: {
       provider:             'MPESA',
@@ -769,23 +790,23 @@ export async function runRetries(): Promise<{
     },
     include: { plan: true, user: true },
   });
-
+ 
   let processed = 0;
   let errors    = 0;
 
-  for (const sub of subs) {
+   for (const sub of subs) {
     try {
       const phone = sub.user.mpesaPhone;
       if (!phone) continue;
-
+ 
       const amountKes = sub.interval === 'YEARLY'
         ? sub.plan.mpesaYearlyKes
         : sub.plan.mpesaMonthlyKes;
-
+ 
       if (!amountKes) continue;
-
+ 
       const attempts = (sub.mpesaRenewalAttempts ?? 0) + 1;
-
+ 
       const stk = await initiateStkPush(
         phone,
         amountKes,
@@ -827,29 +848,24 @@ export async function runRetries(): Promise<{
           },
         });
       });
-
+ 
       processed++;
     } catch (err) {
       console.error(`[cron/retries] Sub ${sub.id}:`, err);
       errors++;
     }
-  }
-
+   }
   return { processed, errors };
 }
-
+ 
 export async function runExpiry(): Promise<{
   expired: number;
   errors:  number;
 }> {
   const now = new Date();
-
+ 
   const subs = await prisma.subscription.findMany({
     where: {
-      // Only expire MPESA subscriptions here. Paystack-managed subscriptions are
-      // controlled by Paystack charge.success / subscription.disable webhooks.
-      // Running this job on Paystack subs risks expiring a subscription seconds
-      // before Paystack's renewal webhook arrives.
       provider:         'MPESA',
       status:           { in: ['ACTIVE', 'PAST_DUE', 'GRACE_PERIOD'] },
       currentPeriodEnd: { lt: now },
@@ -859,10 +875,10 @@ export async function runExpiry(): Promise<{
       ],
     },
   });
-
+ 
   let expired = 0;
   let errors  = 0;
-
+ 
   for (const sub of subs) {
     try {
       // NEW-R3: Skip if a recent SUCCESS mpesaTransaction exists (webhook race guard).
@@ -872,7 +888,7 @@ export async function runExpiry(): Promise<{
           status:         'SUCCESS',
           completedAt:    { gte: new Date(now.getTime() - 2 * 60 * 60 * 1000) },
         },
-      });
+        });
       if (recentSuccess) {
         console.log(
           `[cron/expiry] Sub ${sub.id}: skipping expiry — recent SUCCESS tx ` +
@@ -880,7 +896,7 @@ export async function runExpiry(): Promise<{
         );
         continue;
       }
-
+ 
       const prevStatus = sub.status;
       await prisma.$transaction(async (db) => {
         await db.subscription.update({
@@ -909,24 +925,10 @@ export async function runExpiry(): Promise<{
       errors++;
     }
   }
-
+ 
   return { expired, errors };
 }
 
-// ─── STR→PS-3: Cancel subscription ───────────────────────────────────────────
-//
-// Paystack subs are cancelled by calling POST /subscription/disable.
-// Both paystackSubscriptionCode AND paystackEmailToken must be present —
-// if either is missing the subscription is cancelled DB-only
-// (covers M-Pesa subs and incomplete/abandoned Paystack checkouts).
-//
-// Paystack does not support "cancel at period end" as a first-class API concept
-// (unlike Stripe's cancel_at_period_end flag). We implement it DB-only:
-//   - immediately=false: set cancelAtPeriodEnd=true, leave the Paystack
-//     subscription active. A cron job (or the charge.success webhook) will
-//     call /subscription/disable when currentPeriodEnd is reached.
-//   - immediately=true: call /subscription/disable NOW, then update DB.
-//
 export async function cancelSubscription(
   userId:      string,
   immediately: boolean = false,
@@ -938,15 +940,11 @@ export async function cancelSubscription(
     orderBy: { createdAt: 'desc' },
     include: { plan: true },
   });
-
+ 
   if (!sub) throw new Error('No active subscription found');
-
+ 
   const prevStatus = sub.status;
 
-  // paystackEmailToken is NOT returned by Paystack's /transaction/verify endpoint.
-  // It only arrives in the subscription.create webhook payload. If that webhook was
-  // missed or processed before the routes were mounted, emailToken is null in the DB
-  // even though paystackSubscriptionCode was stored. Fetch it live from Paystack now.
   let emailToken = sub.paystackEmailToken;
   if (sub.provider === 'PAYSTACK' && sub.paystackSubscriptionCode && !emailToken) {
     try {
@@ -966,7 +964,7 @@ export async function cancelSubscription(
   const hasPaystackSub = sub.provider === 'PAYSTACK'
     && !!sub.paystackSubscriptionCode
     && !!emailToken;
-
+ 
   if (hasPaystackSub) {
     if (immediately) {
       // Immediate cancel: disable on Paystack now and set CANCELLED in DB.
@@ -983,17 +981,6 @@ export async function cancelSubscription(
       });
       await logEvent(sub.id, 'CANCELLED', prevStatus, 'CANCELLED', { reason, immediately: true }, ipAddress);
     } else {
-      // FIX: Period-end cancel — call paystackDisable NOW so Paystack stops billing
-      // at next renewal. paystackDisable sets the subscription to non-renewing on
-      // Paystack's side which fires subscription.not_renew (not subscription.disable),
-      // so the subscription stays ACTIVE and the user keeps access until period end.
-      //
-      // When currentPeriodEnd passes, Paystack fires subscription.disable. The webhook
-      // handler checks cancelAtPeriodEnd + currentPeriodEnd before setting CANCELLED
-      // so users don't lose access early.
-      //
-      // Previously this was skipped and left to a cron job — meaning Paystack kept
-      // charging at renewal because it was never told to stop.
       await paystackDisable(sub.paystackSubscriptionCode!, emailToken!).catch(err => {
         // Non-fatal: if Paystack API fails, DB still reflects cancellation intent.
         console.error('[cancelSubscription] paystackDisable failed (period-end):', err);
@@ -1009,8 +996,6 @@ export async function cancelSubscription(
       await logEvent(sub.id, 'CANCEL_SCHEDULED', prevStatus, prevStatus, { reason, atPeriodEnd: true }, ipAddress);
     }
   } else {
-    // M-Pesa or Paystack sub with unresolvable emailToken — DB-only.
-    // Respect the immediately flag here too.
     if (immediately) {
       await prisma.subscription.update({
         where: { id: sub.id },
@@ -1031,18 +1016,14 @@ export async function cancelSubscription(
           cancellationReason: reason ?? 'user_requested',
         },
       });
+
       await logEvent(sub.id, 'CANCEL_SCHEDULED', prevStatus, prevStatus, { reason, atPeriodEnd: true, note: 'db_only' }, ipAddress);
     }
   }
-
+ 
   return (await getCurrentSubscription(userId))!;
 }
 
-// ─── STR→PS-4: Reactivate (undo cancel-at-period-end) ────────────────────────
-//
-// If Paystack codes exist we call /subscription/enable to ensure the
-// subscription is active on the Paystack side. Also clears cancelAtPeriodEnd.
-//
 export async function reactivateSubscription(
   userId:     string,
   ipAddress?: string,
@@ -1055,12 +1036,12 @@ export async function reactivateSubscription(
     },
     orderBy: { createdAt: 'desc' },
   });
-
+ 
   if (!sub) throw new Error('No subscription scheduled for cancellation');
-
+ 
   const hasPaystackSub =
     !!sub.paystackSubscriptionCode && !!sub.paystackEmailToken;
-
+ 
   if (hasPaystackSub) {
     await paystackEnable(
       sub.paystackSubscriptionCode!,
@@ -1068,6 +1049,7 @@ export async function reactivateSubscription(
     );
   }
 
+   
   await prisma.subscription.update({
     where: { id: sub.id },
     data: {
@@ -1075,31 +1057,16 @@ export async function reactivateSubscription(
       cancellationReason: null,
     },
   });
-
+ 
   await logEvent(
     sub.id, 'REACTIVATED', sub.status, sub.status,
     { hadPaystackSub: hasPaystackSub },
     ipAddress,
   );
-
+ 
   return (await getCurrentSubscription(userId))!;
 }
 
-// ─── STR→PS-5: Upgrade subscription ──────────────────────────────────────────
-//
-// Paystack has no direct plan price-swap equivalent (unlike Stripe's
-// subscription item update). Paystack upgrades must go through a new
-// transaction/initialize call with the new plan code.
-//
-// This function handles the DB side of a confirmed Paystack upgrade:
-//   - The old subscription's paystackSubscriptionCode is disabled via API.
-//   - The DB subscription row is updated to the new plan and status.
-//   - Called from the webhook handler once the new charge.success arrives,
-//     OR from the route directly when the client confirms an upgrade intent.
-//
-// For the checkout redirect flow (initiate), routes should call
-// createCheckoutSession with the new plan — this function handles post-payment.
-//
 export async function upgradeSubscription(
   userId:      string,
   newPlanId:   string,
@@ -1114,26 +1081,20 @@ export async function upgradeSubscription(
     }),
     prisma.plan.findUnique({ where: { id: newPlanId } }),
   ]);
-
+ 
   if (!sub)     throw new Error('No active subscription to upgrade');
   if (!newPlan) throw new Error('Target plan not found');
-
   const hasPaystackSub =
     !!sub.paystackSubscriptionCode && !!sub.paystackEmailToken;
-
+ 
   if (hasPaystackSub) {
-    // Paystack does not support mid-cycle plan swaps via API.
-    // Signal to the route/client that a new checkout is required.
-    // The client should call createCheckoutSession with newPlanId, which
-    // creates a new INCOMPLETE sub. On charge.success, the webhook disables
-    // the old Paystack subscription and activates the new one.
     throw new Error(
       'PAYSTACK_NEW_CHECKOUT_REQUIRED: Paystack upgrades require a new payment. ' +
       `Use /subscriptions/checkout with planId=${newPlanId}. ` +
       'The existing subscription will be cancelled once the new payment succeeds.',
     );
   }
-
+ 
   // M-Pesa sub upgrade — DB-only (M-Pesa has no subscription management API).
   // The new plan takes effect immediately; user starts a new M-Pesa payment flow.
   const prevPlanSlug = sub.plan.slug;
@@ -1153,16 +1114,10 @@ export async function upgradeSubscription(
     { fromPlan: prevPlanSlug, toPlan: newPlan.slug, interval: newInterval, note: 'mpesa_db_only' },
     ipAddress,
   );
-
+ 
   return (await getCurrentSubscription(userId))!;
 }
 
-// ─── STR→PS-6: Schedule downgrade ────────────────────────────────────────────
-//
-// Paystack does not support metadata on scheduled plan changes (no equivalent
-// of stripe.subscriptions.update with metadata). The scheduled change is stored
-// in DB only. Applied by the cron job or charge.success webhook on period end.
-//
 export async function scheduleDowngrade(
   userId:      string,
   newPlanId:   string,
@@ -1177,11 +1132,10 @@ export async function scheduleDowngrade(
     }),
     prisma.plan.findUnique({ where: { id: newPlanId } }),
   ]);
-
+ 
   if (!sub)     throw new Error('No active subscription');
   if (!newPlan) throw new Error('Target plan not found');
 
-  // DB-only: store the scheduled plan. A cron job applies it at period end.
   await prisma.subscription.update({
     where: { id: sub.id },
     data: {
@@ -1189,22 +1143,16 @@ export async function scheduleDowngrade(
       scheduledInterval: newInterval,
     },
   });
-
+ 
   await logEvent(
     sub.id, 'DOWNGRADE_SCHEDULED', sub.status, sub.status,
     { fromPlan: sub.plan.slug, toPlan: newPlan.slug, interval: newInterval, note: 'db_only_paystack' },
     ipAddress,
   );
-
+ 
   return (await getCurrentSubscription(userId))!;
 }
 
-// ─── STR→PS-7: Billing portal ────────────────────────────────────────────────
-//
-// Paystack has no hosted billing / customer portal equivalent.
-// Return the frontend subscription management page URL so the client
-// can navigate there for plan changes, cancellation, and payment history.
-//
 export async function getBillingPortalUrl(userId: string): Promise<string> {
   const frontendBase = getFrontendUrl();
   // Optionally append ?manage=1 so the frontend can auto-scroll to the
@@ -1212,29 +1160,11 @@ export async function getBillingPortalUrl(userId: string): Promise<string> {
   return `${frontendBase}/subscription?manage=1`;
 }
 
-
-// ─── Alias for subscription.routes.ts ────────────────────────────────────────
-// routes import createPaystackCheckout; service implements as createCheckoutSession
 export const createPaystackCheckout = createCheckoutSession;
-
+ 
 // FIX-H4: Export the singleton so existing importers keep working.
 export { prisma };
 
-// ─── Reconciliation job ───────────────────────────────────────────────────────
-
-/**
- * NEW-R5: runReconciliation
- *
- * Scans every M-Pesa SUCCESS transaction from the last 48 hours and verifies:
- *   1. A matching Payment record exists for the receipt number.
- *   2. The linked subscription is ACTIVE (not PAST_DUE / EXPIRED).
- *   3. currentPeriodEnd is in the future.
- *
- * Any drift found is fixed atomically inside a transaction and logged.
- * Run daily via POST /internal/cron/reconcile.
- *
- * TODO: wire up an email/Slack alert when driftCount > 0.
- */
 export async function runReconciliation(): Promise<{
   checked: number;
   fixed:   number;
@@ -1242,7 +1172,7 @@ export async function runReconciliation(): Promise<{
 }> {
   const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
   const now   = new Date();
-
+ 
   const txns = await prisma.mpesaTransaction.findMany({
     where: {
       status:         'SUCCESS',
@@ -1260,27 +1190,26 @@ export async function runReconciliation(): Promise<{
   let checked = 0;
   let fixed   = 0;
   let errors  = 0;
-
+ 
   for (const tx of txns) {
     checked++;
-
+ 
     const sub = tx.subscription;
     if (!sub) continue;
-
+ 
     try {
       const paymentExists = tx.mpesaReceiptNumber
         ? await prisma.payment.findFirst({
             where: { mpesaReceiptNumber: tx.mpesaReceiptNumber },
           })
         : null;
-
+ 
       const subIsHealthy =
         sub.status === 'ACTIVE' &&
         sub.currentPeriodEnd != null &&
         sub.currentPeriodEnd > now;
-
+ 
       if (paymentExists && subIsHealthy) continue;
-
       console.warn(
         `[reconcile] DRIFT detected — tx ${tx.id} ` +
         `receipt ${tx.mpesaReceiptNumber ?? 'N/A'} | ` +
@@ -1288,7 +1217,7 @@ export async function runReconciliation(): Promise<{
         `periodEnd=${sub.currentPeriodEnd?.toISOString() ?? 'null'} | ` +
         `paymentRecord=${paymentExists ? 'EXISTS' : 'MISSING'}`,
       );
-
+ 
       const baseDate = tx.completedAt ?? now;
       let repairedPeriodEnd: Date;
       if (sub.interval === 'YEARLY') {
@@ -1326,7 +1255,7 @@ export async function runReconciliation(): Promise<{
             },
           });
         }
-
+ 
         await db.subscriptionLog.create({
           data: {
             subscriptionId: sub.id,
@@ -1344,18 +1273,18 @@ export async function runReconciliation(): Promise<{
           },
         });
       });
-
+ 
       fixed++;
       console.log(`[reconcile] Fixed sub ${sub.id} — status restored to ACTIVE, period reset.`);
-
+ 
     } catch (err) {
       console.error(`[reconcile] Error processing tx ${tx.id}:`, err);
       errors++;
     }
   }
 
+   
   console.log(`[reconcile] Done — checked=${checked} fixed=${fixed} errors=${errors}`);
   return { checked, fixed, errors };
 }
-
-
+  
