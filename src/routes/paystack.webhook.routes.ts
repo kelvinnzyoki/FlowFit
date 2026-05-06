@@ -401,170 +401,167 @@ async function processEvent(event: PaystackWebhookEvent): Promise<void> {
     // subscription_code and email_token — storing them here is the primary fix.
     //
     // FIX-W3: Rewrote all lookup strategies. See module-level comment.
-    case 'subscription.create': {
-      const subCode      = data.subscription_code as string | undefined;
-      const emailToken   = data.email_token        as string | undefined;
-      const custEmail    = data.customer?.email         as string | undefined;
-      // FIX-W3 Root cause B: customer_code was never used as a lookup key even
-      // though we store it in the INCOMPLETE row at checkout creation and
-      // Paystack always includes it here. It is now Strategy 0.
-      const customerCode = data.customer?.customer_code as string | undefined;
-
-      console.log('[Webhook] subscription.create received', {
-        subCode,
-        hasEmailToken: !!emailToken,
-        custEmail,
-        customerCode,
-      });
-
-      if (!subCode) {
-        console.warn('[Webhook] subscription.create: no subscription_code in payload — skipping');
-        return;
-      }
-
-      let dbSub: Awaited<ReturnType<typeof prisma.subscription.findFirst>> = null;
-
-      // ── Strategy 0 (NEW — most reliable): lookup by paystackCustomerCode ──
-      // We write paystackCustomerCode onto the INCOMPLETE row inside
-      // createCheckoutSession before calling initializeTransaction. Paystack
-      // always returns customer.customer_code in subscription.create.
-      // This link is: immutable, unique, case-exact, and race-free.
-      // Previous Strategy 0 used data.most_recent_invoice?.transaction which
-      // is Paystack's numeric internal transaction ID — NOT our reference string.
-      // That query silently matched nothing every time. (FIX-W3 Root cause A)
-      if (customerCode) {
-        dbSub = await prisma.subscription.findFirst({
-          where: {
-            paystackCustomerCode: customerCode,
-            status: { in: ['INCOMPLETE', 'ACTIVE', 'TRIALING', 'PAST_DUE'] },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-        if (dbSub) {
-          console.log(`[Webhook] subscription.create: found sub ${dbSub.id} via paystackCustomerCode`);
-        }
-      }
-
-      // ── Strategy 1: find by subscription code already stored ──────────────
-      // charge.success sometimes includes subscription_code for renewals;
-      // if so, it would have stored it during the charge.success handler.
-      if (!dbSub) {
-        dbSub = await prisma.subscription.findFirst({
-          where:   { paystackSubscriptionCode: subCode },
-          orderBy: { createdAt: 'desc' },
-        });
-        if (dbSub) {
-          console.log(`[Webhook] subscription.create: found sub ${dbSub.id} via subscriptionCode`);
-        }
-      }
-
-      // ── Strategy 2: customer email → user → most recent matching sub ──────
-      // Fallback when customerCode is absent or not yet stored. Searches all
-      // active-ish statuses so it matches regardless of whether charge.success
-      // ran first (ACTIVE) or hasn't run yet (INCOMPLETE).
-      // FIX-W3 Root cause C (preserved fix): removed the INCOMPLETE-only
-      // Strategy 3 — by the time subscription.create fires, status is ACTIVE.
-      if (!dbSub && custEmail) {
-        const user = await prisma.user.findUnique({
-          where:  { email: custEmail },
-          select: { id: true },
-        });
-        if (user) {
-          dbSub = await prisma.subscription.findFirst({
-            where: {
-              userId: user.id,
-              status: { in: ['INCOMPLETE', 'ACTIVE', 'TRIALING', 'PAST_DUE'] },
-            },
-            orderBy: { createdAt: 'desc' },
-          });
-          if (dbSub) {
-            console.log(`[Webhook] subscription.create: found sub ${dbSub.id} via custEmail`);
-          }
-        }
-      }
-
-      if (!dbSub) {
-        console.error(
-          '[Webhook] subscription.create: NO matching subscription found.',
-          { subCode, customerCode, custEmail },
-          '— subscription_code and email_token will NOT be stored.',
-        );
-        return;
-      }
-
-      // ── FIX-W4: Activate if still INCOMPLETE ─────────────────────────────
-      // subscription.create can arrive before charge.success (Paystack event
-      // order is not guaranteed). If the row is still INCOMPLETE we activate
-      // it here so the user does not have to wait for charge.success.
-      const now = new Date();
-      const activationPatch: Record<string, unknown> = {};
-      if (dbSub.status === 'INCOMPLETE') {
-        const nextPeriodEnd = new Date(now);
-        if (dbSub.interval === 'YEARLY') {
-          nextPeriodEnd.setFullYear(nextPeriodEnd.getFullYear() + 1);
-        } else {
-          nextPeriodEnd.setMonth(nextPeriodEnd.getMonth() + 1);
-        }
-        activationPatch.status             = 'ACTIVE';
-        activationPatch.activatedAt        = now;
-        activationPatch.currentPeriodStart = now;
-        activationPatch.currentPeriodEnd   = nextPeriodEnd;
-        activationPatch.cancelAtPeriodEnd  = false;
-        console.log(
-          `[Webhook] subscription.create: sub ${dbSub.id} is still INCOMPLETE — ` +
-          'activating now (subscription.create arrived before charge.success)',
-        );
-      }
-
-      // ── Always update codes ───────────────────────────────────────────────
-      // subscription.create is the ONLY reliable source of email_token.
-      // Use || not ?? so an empty string is also replaced by the live value.
-      await prisma.subscription.update({
-        where: { id: dbSub.id },
-        data: {
-          paystackSubscriptionCode: subCode      || dbSub.paystackSubscriptionCode,
-          paystackEmailToken:       emailToken   || dbSub.paystackEmailToken,
-          // Backfill customerCode if somehow missing
-          ...(customerCode ? { paystackCustomerCode: customerCode } : {}),
-          // Activate if still INCOMPLETE (FIX-W4)
-          ...activationPatch,
-        },
-      });
-
-      console.log(
-        `[Webhook] subscription.create: ✅ stored codes for sub ${dbSub.id}`,
-        { subCode, hasEmailToken: !!emailToken },
-      );
-
-      // ── Log the code-storage event ────────────────────────────────────────
-      await prisma.subscriptionLog.create({
-        data: {
-          subscriptionId: dbSub.id,
-          event:          'WEBHOOK_RECEIVED',
-          previousStatus: dbSub.status,
-          newStatus:      (activationPatch.status as any) ?? dbSub.status,
-          metadata: {
-            webhookEvent:           'subscription.create',
-            paystackSubscriptionCode: subCode,
-            hasEmailToken:          !!emailToken,
-          },
-        },
-      }).catch(err => console.warn('[Webhook] subscription.create: log write failed (non-fatal):', err));
-
+     
       // ── Trial-started notification ────────────────────────────────────────
-      if (dbSub.trialEndsAt && dbSub.trialEndsAt > new Date()) {
-        const plan = await prisma.plan.findUnique({
-          where:  { id: dbSub.planId },
-          select: { name: true, trialDays: true },
-        });
-        const msLeft   = dbSub.trialEndsAt.getTime() - Date.now();
-        const daysLeft = Math.max(1, Math.ceil(msLeft / 86_400_000));
-        notifyTrialStarted(dbSub.userId, plan?.name ?? 'Premium', daysLeft)
-          .catch(err => console.error('[Webhook] trial_started notification failed:', err));
-      }
+      case 'subscription.create': {
+  const subCode    = data.subscription_code as string | undefined;
+  const emailToken = data.email_token        as string | undefined;
+  const custEmail  = data.customer?.email         as string | undefined;
+  const customerCode = data.customer?.customer_code as string | undefined;
 
-      break;
+  console.log('[Webhook] subscription.create received', {
+    subCode,
+    hasEmailToken: !!emailToken,
+    custEmail,
+    customerCode,
+  });
+
+  if (!subCode) {
+    console.warn('[Webhook] subscription.create: no subscription_code — skipping');
+    break;
+  }
+  if (!emailToken) {
+    console.warn('[Webhook] subscription.create: no email_token — skipping');
+    break;
+  }
+
+  let dbSub: Awaited<ReturnType<typeof prisma.subscription.findFirst>> = null;
+
+  // Strategy 0: by paystackCustomerCode (most reliable — set on INCOMPLETE row at checkout)
+  if (customerCode) {
+    dbSub = await prisma.subscription.findFirst({
+      where: {
+        paystackCustomerCode: customerCode,
+        status: { in: ['INCOMPLETE', 'ACTIVE', 'TRIALING', 'PAST_DUE'] },
+      },
+      orderBy: { updatedAt: 'desc' },   // updatedAt: charge.success would have just touched this row
+    });
+    console.log(
+      dbSub
+        ? `[Webhook] subscription.create: Strategy 0 found sub ${dbSub.id} via customerCode`
+        : `[Webhook] subscription.create: Strategy 0 found NOTHING for customerCode=${customerCode}`,
+    );
+  }
+
+  // Strategy 1: by subscription code already stored (renewal case)
+  if (!dbSub) {
+    dbSub = await prisma.subscription.findFirst({
+      where:   { paystackSubscriptionCode: subCode },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (dbSub) console.log(`[Webhook] subscription.create: Strategy 1 found sub ${dbSub.id} via subCode`);
+  }
+
+  // Strategy 2: by customer email → user → most recent active sub
+  if (!dbSub && custEmail) {
+    const user = await prisma.user.findUnique({
+      where:  { email: custEmail },
+      select: { id: true },
+    });
+    if (user) {
+      dbSub = await prisma.subscription.findFirst({
+        where: {
+          userId: user.id,
+          status: { in: ['INCOMPLETE', 'ACTIVE', 'TRIALING', 'PAST_DUE'] },
+          provider: 'PAYSTACK',
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+      if (dbSub) console.log(`[Webhook] subscription.create: Strategy 2 found sub ${dbSub.id} via custEmail`);
     }
+  }
+
+  // Strategy 3: by paystackReference — charge.success stores it when activating
+  if (!dbSub && data.most_recent_invoice?.transaction_reference) {
+    const ref = data.most_recent_invoice.transaction_reference as string;
+    dbSub = await prisma.subscription.findFirst({
+      where: { paystackReference: ref },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (dbSub) console.log(`[Webhook] subscription.create: Strategy 3 found sub ${dbSub.id} via reference`);
+  }
+
+  if (!dbSub) {
+    console.error(
+      '[Webhook] subscription.create: ❌ NO matching subscription found after all strategies.',
+      { subCode, customerCode, custEmail },
+      '— paystackSubscriptionCode and paystackEmailToken will NOT be stored.',
+      'Check that paystackCustomerCode is set on the subscription row at checkout.',
+    );
+    break;
+  }
+
+  // FIX-W4: Activate if charge.success hasn't fired yet
+  const now = new Date();
+  const activationPatch: Record<string, unknown> = {};
+  if (dbSub.status === 'INCOMPLETE') {
+    const nextPeriodEnd = new Date(now);
+    if (dbSub.interval === 'YEARLY') {
+      nextPeriodEnd.setFullYear(nextPeriodEnd.getFullYear() + 1);
+    } else {
+      nextPeriodEnd.setMonth(nextPeriodEnd.getMonth() + 1);
+    }
+    activationPatch.status             = 'ACTIVE';
+    activationPatch.activatedAt        = now;
+    activationPatch.currentPeriodStart = now;
+    activationPatch.currentPeriodEnd   = nextPeriodEnd;
+    activationPatch.cancelAtPeriodEnd  = false;
+    console.log(`[Webhook] subscription.create: sub ${dbSub.id} is INCOMPLETE — activating now`);
+  }
+
+  try {
+    await prisma.subscription.update({
+      where: { id: dbSub.id },
+      data: {
+        // Use || not ?? so empty string is also replaced
+        paystackSubscriptionCode: subCode      || dbSub.paystackSubscriptionCode || null,
+        paystackEmailToken:       emailToken   || dbSub.paystackEmailToken       || null,
+        // Backfill customerCode if missing
+        ...(customerCode && !dbSub.paystackCustomerCode
+          ? { paystackCustomerCode: customerCode }
+          : {}),
+        ...activationPatch,
+      },
+    });
+
+    console.log(
+      `[Webhook] subscription.create: ✅ STORED codes for sub ${dbSub.id}`,
+      { subCode, emailTokenLength: emailToken.length },
+    );
+  } catch (updateErr: any) {
+    console.error(
+      `[Webhook] subscription.create: ❌ DB UPDATE FAILED for sub ${dbSub.id}:`,
+      updateErr?.message ?? updateErr,
+    );
+    throw updateErr; // re-throw so outer catch marks the webhook as failed
+  }
+
+  await prisma.subscriptionLog.create({
+    data: {
+      subscriptionId: dbSub.id,
+      event:          'WEBHOOK_RECEIVED',
+      previousStatus: dbSub.status,
+      newStatus:      (activationPatch.status as any) ?? dbSub.status,
+      metadata: {
+        webhookEvent:             'subscription.create',
+        paystackSubscriptionCode: subCode,
+        hasEmailToken:            !!emailToken,
+      },
+    },
+  }).catch(err => console.warn('[Webhook] subscription.create log write failed (non-fatal):', err));
+
+  if (dbSub.trialEndsAt && dbSub.trialEndsAt > now) {
+    const plan = await prisma.plan.findUnique({
+      where:  { id: dbSub.planId },
+      select: { name: true, trialDays: true },
+    });
+    const daysLeft = Math.max(1, Math.ceil((dbSub.trialEndsAt.getTime() - Date.now()) / 86_400_000));
+    notifyTrialStarted(dbSub.userId, plan?.name ?? 'Premium', daysLeft)
+      .catch(err => console.error('[Webhook] trial_started notification failed:', err));
+  }
+
+  break;
+      }
 
     // ── Subscription disabled (cancelled) ─────────────────────────────────────
     case 'subscription.disable': {
