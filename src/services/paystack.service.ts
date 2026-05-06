@@ -626,6 +626,7 @@ export async function verifyPaystackPayment(
   }
 
   return { success: true, status: 'success', subscription: await fetchCurrentSub(userId) };
+}
 
 // FIX-V2: Defined at module level in this file to avoid circular import.
 // (subscription.service.ts imports from paystack.service.ts; importing it
