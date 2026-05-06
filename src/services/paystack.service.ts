@@ -515,88 +515,117 @@ export async function verifyPaystackPayment(
     });
   });
 
-  // ── Post-activation: ensure subscription_code + email_token are stored ──────
-  // /transaction/verify often omits subscription data, especially when called
-  // immediately after redirect. Try three escalating strategies to get the codes.
-  if (!subscriptionCode) {
-    const updatedSub = await prisma.subscription.findUnique({
-      where:  { id: sub!.id },
-      select: { paystackSubscriptionCode: true, paystackCustomerCode: true, planId: true },
-    });
+// ── Post-activation: fetch subscription_code + email_token ───────────────
+  // /transaction/verify never includes these on first payment — they only
+  // arrive in the subscription.create webhook (~3-5 min later).
+  // We aggressively try to fetch them now as a belt-and-suspenders measure.
+  // If Paystack hasn't created the Subscription object yet, we schedule
+  // background retries every 30s for up to 5 minutes.
 
-    // Only attempt if codes are still missing after the transaction
-    if (!updatedSub?.paystackSubscriptionCode) {
-      let fetchedCode:  string | null = null;
-      let fetchedToken: string | null = null;
-      let fetchedNextDate: Date | null = null;
+  if (!subscriptionCode && sub!.paystackCustomerCode) {
+    const subId        = sub!.id;
+    const custCode     = sub!.paystackCustomerCode;
+    const planInterval = (sub!.interval ?? 'MONTHLY') as BillingInterval;
 
-      // Strategy A: fetch from Paystack by customer code (most reliable)
-      if (updatedSub?.paystackCustomerCode) {
-        try {
-          const found = await findPaystackSubscriptionByCustomer(updatedSub.paystackCustomerCode);
-          if (found?.subscription_code) {
-            fetchedCode     = found.subscription_code;
-            fetchedToken    = found.email_token ?? null;
-            fetchedNextDate = found.next_payment_date ? new Date(found.next_payment_date) : null;
-          }
-        } catch (e) {
-          console.warn('[verifyPaystackPayment] Strategy A (customer lookup) failed:', e);
-        }
-      }
-
-      // Strategy B: create a Paystack Subscription programmatically using plan_code
-      // Only works when paystackPlanCodeMonthly/Yearly is set on the Plan
-      if (!fetchedCode && updatedSub?.planId) {
-        try {
-          const plan = await prisma.plan.findUnique({
-            where:  { id: updatedSub.planId },
-            select: {
-              paystackPlanCodeMonthly: true,
-              paystackPlanCodeYearly:  true,
+    // Immediate attempt — might succeed if payment was fast
+    const fetchAndStore = async (): Promise<boolean> => {
+      try {
+        // Strategy A: look up existing subscription by customer code
+        const found = await findPaystackSubscriptionByCustomer(custCode);
+        if (found?.subscription_code && found?.email_token) {
+          await prisma.subscription.update({
+            where: { id: subId },
+            data: {
+              paystackSubscriptionCode: found.subscription_code,
+              paystackEmailToken:       found.email_token,
+              ...(found.next_payment_date
+                ? { currentPeriodEnd: new Date(found.next_payment_date) }
+                : {}),
             },
           });
-          const planInterval = (sub!.interval ?? 'MONTHLY') as BillingInterval;
-          const planCode     = planInterval === 'YEARLY'
-            ? plan?.paystackPlanCodeYearly
-            : plan?.paystackPlanCodeMonthly;
-
-          if (planCode && updatedSub?.paystackCustomerCode) {
-            const created = await createPaystackSubscription(
-              updatedSub.paystackCustomerCode,
-              planCode,
-              nextPaymentDate,
-            );
-            fetchedCode     = created.subscription_code;
-            fetchedToken    = created.email_token ?? null;
-            fetchedNextDate = created.next_payment_date ? new Date(created.next_payment_date) : null;
-          }
-        } catch (e) {
-          console.warn('[verifyPaystackPayment] Strategy B (create subscription) failed:', e);
+          console.log(`[verifyPaystackPayment] ✅ Stored codes via customer lookup: ${found.subscription_code}`);
+          return true;
         }
-      }
 
-      // Persist whatever we found
-      if (fetchedCode) {
-        await prisma.subscription.update({
-          where: { id: sub!.id },
-          data: {
-            paystackSubscriptionCode: fetchedCode,
-            ...(fetchedToken    ? { paystackEmailToken:  fetchedToken    } : {}),
-            ...(fetchedNextDate ? { currentPeriodEnd:    fetchedNextDate } : {}),
-          },
+        // Strategy B: create Paystack subscription programmatically
+        const planRecord = await prisma.plan.findUnique({
+          where:  { id: sub!.planId },
+          select: { paystackPlanCodeMonthly: true, paystackPlanCodeYearly: true },
         });
-        console.log(`[verifyPaystackPayment] Stored subscription code ${fetchedCode} via post-activation fetch`);
-      } else {
-        console.warn(
-          `[verifyPaystackPayment] Could not retrieve subscription_code for sub ${sub!.id}. ` +
-          'It will be stored when the subscription.create webhook fires (usually within 30s).',
-        );
+        const planCode = planInterval === 'YEARLY'
+          ? planRecord?.paystackPlanCodeYearly
+          : planRecord?.paystackPlanCodeMonthly;
+
+        if (planCode) {
+          try {
+            const created = await createPaystackSubscription(custCode, planCode);
+            if (created?.subscription_code && created?.email_token) {
+              await prisma.subscription.update({
+                where: { id: subId },
+                data: {
+                  paystackSubscriptionCode: created.subscription_code,
+                  paystackEmailToken:       created.email_token,
+                  ...(created.next_payment_date
+                    ? { currentPeriodEnd: new Date(created.next_payment_date) }
+                    : {}),
+                },
+              });
+              console.log(`[verifyPaystackPayment] ✅ Stored codes via programmatic creation: ${created.subscription_code}`);
+              return true;
+            }
+          } catch (createErr: any) {
+            console.warn('[verifyPaystackPayment] Strategy B (create sub) failed:', createErr?.message);
+          }
+        }
+
+        return false;
+      } catch (fetchErr: any) {
+        console.warn('[verifyPaystackPayment] Code fetch attempt failed:', fetchErr?.message);
+        return false;
       }
+    };
+
+    // Try immediately
+    const immediate = await fetchAndStore();
+
+    // If not found yet, schedule retries every 30s for 5 minutes (10 attempts)
+    // This is best-effort on serverless — subscription.create webhook is authoritative
+    if (!immediate) {
+      console.log(
+        `[verifyPaystackPayment] Codes not yet available for sub ${subId}. ` +
+        'Scheduling background retries every 30s (subscription.create webhook will also store them).',
+      );
+      let attempts = 0;
+      const maxAttempts = 10;
+      const retry = setInterval(async () => {
+        attempts++;
+        // Check if codes were already stored by webhook
+        const current = await prisma.subscription.findUnique({
+          where:  { id: subId },
+          select: { paystackSubscriptionCode: true },
+        }).catch(() => null);
+
+        if (current?.paystackSubscriptionCode) {
+          console.log(`[verifyPaystackPayment] Codes stored by webhook — clearing retry interval for sub ${subId}`);
+          clearInterval(retry);
+          return;
+        }
+
+        const stored = await fetchAndStore();
+        if (stored || attempts >= maxAttempts) {
+          clearInterval(retry);
+          if (!stored) {
+            console.error(
+              `[verifyPaystackPayment] ❌ Could not store codes for sub ${subId} after ${maxAttempts} attempts. ` +
+              'Billing portal and cancellation will not work until subscription.create webhook fires.',
+            );
+          }
+        }
+      }, 30_000);
     }
   }
 
   return { success: true, status: 'success', subscription: await fetchCurrentSub(userId) };
-}
 
 // FIX-V2: Defined at module level in this file to avoid circular import.
 // (subscription.service.ts imports from paystack.service.ts; importing it
