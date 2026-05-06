@@ -294,10 +294,11 @@ export async function createCheckoutSession(
     data: {
       userId,
       planId,
-      status: 'INCOMPLETE',
+      status:              'INCOMPLETE',
       interval,
-      provider: 'PAYSTACK',
-      paystackCustomerCode,
+      provider:            'PAYSTACK',
+      paystackCustomerCode,              // ← CRITICAL: webhook Strategy 0 relies on this
+      cancelAtPeriodEnd:   false,
       trialStartedAt: plan.trialDays > 0 && !existing ? new Date() : null,
       trialEndsAt: plan.trialDays > 0 && !existing
         ? new Date(Date.now() + plan.trialDays * 86_400_000)
