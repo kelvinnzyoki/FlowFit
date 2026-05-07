@@ -209,20 +209,26 @@ async function findSubscriptionForCreate(data: Record<string, any>) {
   const planCode = pickPlanCode(data);
   const planId = await findPlanIdByPaystackPlanCode(planCode);
 
-  // 1) Strongest match: subscription row ID embedded during checkout initialization.
+// Strategy 1: direct DB ID from checkout metadata
   if (metaSubscriptionId) {
     const sub = await prisma.subscription.findUnique({ where: { id: metaSubscriptionId } });
-    if (sub) return sub;
+    if (sub && !['CANCELLED', 'INCOMPLETE_EXPIRED', 'EXPIRED'].includes(sub.status)) {
+      console.log(`[findSubscriptionForCreate] Strategy 1 matched sub ${sub.id} via metaSubscriptionId`);
+      return sub;
+    }
+    console.warn(`[findSubscriptionForCreate] Strategy 1: metaSubscriptionId=${metaSubscriptionId} found but status=${sub?.status ?? 'not found'} — falling through`);
   }
 
-  // 2) Idempotency: if this Paystack subscription was already attached, reuse it.
+  // Strategy 2: idempotency — sub already linked on a prior webhook
   if (subCode) {
     const sub = await prisma.subscription.findFirst({ where: { paystackSubscriptionCode: subCode } });
-    if (sub) return sub;
+    if (sub) {
+      console.log(`[findSubscriptionForCreate] Strategy 2 matched sub ${sub.id} via existing subCode`);
+      return sub;
+    }
   }
 
-  // 3) Most reliable post-charge match: the invoice/transaction reference is the
-  // same reference saved on the INCOMPLETE row by checkout/charge.success.
+  // Strategy 3: transaction reference stored on INCOMPLETE row by charge.success
   if (reference) {
     const sub = await prisma.subscription.findFirst({
       where: {
@@ -232,22 +238,29 @@ async function findSubscriptionForCreate(data: Record<string, any>) {
       },
       orderBy: { createdAt: 'desc' },
     });
-    if (sub) return sub;
+    if (sub) {
+      console.log(`[findSubscriptionForCreate] Strategy 3 matched sub ${sub.id} via reference=${reference}`);
+      return sub;
+    }
+    console.warn(`[findSubscriptionForCreate] Strategy 3: reference=${reference} found nothing in DB`);
   }
 
-  // 4) Fallback only to INCOMPLETE rows. Never let a newer orphan or an older
-  // ACTIVE row steal codes for this subscription.create event.
+  // Strategy 4a — INCOMPLETE rows first (the paid row we are looking for).
+  // CRITICAL: orderBy desc so newest INCOMPLETE is picked, not an older TRIALING row.
   if (customerCode) {
     const sub = await prisma.subscription.findFirst({
       where: {
         paystackCustomerCode: customerCode,
         provider: 'PAYSTACK',
-        status: { notIn: ['CANCELLED', 'EXPIRED', 'INCOMPLETE_EXPIRED'] },
+        status: 'INCOMPLETE',
         ...(planId ? { planId } : {}),
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
     });
-    if (sub) return sub;
+    if (sub) {
+      console.log(`[findSubscriptionForCreate] Strategy 4a matched INCOMPLETE sub ${sub.id} via customerCode`);
+      return sub;
+    }
   }
 
   if (customerEmail) {
@@ -257,12 +270,55 @@ async function findSubscriptionForCreate(data: Record<string, any>) {
         where: {
           userId: user.id,
           provider: 'PAYSTACK',
+          status: 'INCOMPLETE',
+          ...(planId ? { planId } : {}),
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (sub) {
+        console.log(`[findSubscriptionForCreate] Strategy 4b matched INCOMPLETE sub ${sub.id} via email`);
+        return sub;
+      }
+    }
+  }
+
+  // Strategy 4c — broader fallback: any active/trialing row that is missing email_token.
+  // This covers the edge case where charge.success already activated the row but
+  // subscription.create still needs to write email_token.
+  if (customerCode) {
+    const sub = await prisma.subscription.findFirst({
+      where: {
+        paystackCustomerCode: customerCode,
+        provider: 'PAYSTACK',
+        paystackEmailToken: null,
+        status: { notIn: ['CANCELLED', 'EXPIRED', 'INCOMPLETE_EXPIRED'] },
+        ...(planId ? { planId } : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (sub) {
+      console.log(`[findSubscriptionForCreate] Strategy 4c matched sub ${sub.id} (status=${sub.status}, emailToken=null)`);
+      return sub;
+    }
+  }
+
+  if (customerEmail) {
+    const user = await prisma.user.findUnique({ where: { email: customerEmail }, select: { id: true } });
+    if (user) {
+      const sub = await prisma.subscription.findFirst({
+        where: {
+          userId: user.id,
+          provider: 'PAYSTACK',
+          paystackEmailToken: null,
           status: { notIn: ['CANCELLED', 'EXPIRED', 'INCOMPLETE_EXPIRED'] },
           ...(planId ? { planId } : {}),
         },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { updatedAt: 'desc' },
       });
-      if (sub) return sub;
+      if (sub) {
+        console.log(`[findSubscriptionForCreate] Strategy 4d matched sub ${sub.id} via email (emailToken=null)`);
+        return sub;
+      }
     }
   }
 
