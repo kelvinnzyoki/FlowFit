@@ -276,11 +276,8 @@ export async function createCheckoutSession(
   });
 
   const base = getFrontendUrl();
-  // Fallback uses subscription.html — must match the actual file name served.
-  // The frontend's callbackUrl also uses .html; these must be consistent.
-  // Paystack appends ?reference=xxx&trxref=xxx to whichever URL is used.
-  const resolvedSuccessUrl = successUrl || `${base}/subscription.html?success=1`;
-  const resolvedCancelUrl  = cancelUrl  || `${base}/subscription.html?cancelled=1`;
+  const resolvedSuccessUrl = successUrl || `${base}/subscription?success=1`;
+  const resolvedCancelUrl  = cancelUrl  || `${base}/subscription?cancelled=1`;
 
   const paystackCustomerCode = await getOrCreatePaystackCustomer(
     prisma, userId, email, name
