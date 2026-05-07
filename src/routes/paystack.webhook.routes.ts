@@ -713,12 +713,14 @@ async function processEvent(event: PaystackWebhookEvent): Promise<void> {
         if (sub && data.status) {
           const newStatus = mapPaystackStatus(String(data.status));
           await prisma.subscription.update({ where: { id: sub.id }, data: { status: newStatus } }).catch(() => undefined);
-        }
-        console.error('[Paystack webhook] Failed to create idempotency record:', createErr);
+
+          console.error('[Paystack webhook] Failed to create idempotency record:', createErr);
     // Non-P2002 DB error (e.g. NOT NULL, connection timeout).
     // Return 200 so Paystack stops retrying — we will process despite the failed record.
     // Remove this comment and the next line once Fix C SQL has been applied.
     // After SQL fix, this branch should never fire.
+        }
+        
       }
       break;
     }
