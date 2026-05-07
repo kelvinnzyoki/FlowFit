@@ -38,7 +38,7 @@ app.set('trust proxy', 1);
 // Configure Paystack dashboard to one of these exact URLs.
 const paystackRawJson = express.raw({ type: 'application/json', limit: '2mb' });
 app.use('/api/webhooks/paystack', paystackRawJson, paystackWebhookRoutes);
-app.use('/api/v1/paystack/webhook', paystackRawJson, paystackWebhookRoutes);
+app.use('/api/v1/webhooks/paystack', paystackRawJson, paystackWebhookRoutes);
 
 // -----------------------------------------------------------------------------
 // SECURITY MIDDLEWARE
