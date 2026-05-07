@@ -182,22 +182,36 @@ export async function getCurrentSubscription(
       scheduledPlanSlug = sp?.slug ?? null;
     }
 
+    // If the row is INCOMPLETE but payment was made (paystackReference set and
+    // currentPeriodEnd in the future), show it as TRIALING so the user sees
+    // "Activating..." rather than the locked free-plan screen.
+    const isPendingActivation = (
+      sub.status === 'INCOMPLETE' &&
+      sub.provider === 'PAYSTACK' &&
+      !!sub.paystackReference &&
+      !!sub.currentPeriodEnd &&
+      sub.currentPeriodEnd > new Date()
+    );
+    const effectiveStatus = isPendingActivation ? 'TRIALING' : sub.status;
+
     return {
-      id:                      sub.id,
-      status:                  sub.status,
-      interval:                sub.interval,
+      id:                       sub.id,
+      status:                   effectiveStatus,
+      interval:                 sub.interval,
       plan,
-      trialEndsAt:             sub.trialEndsAt?.toISOString() ?? null,
-      currentPeriodStart:      sub.currentPeriodStart?.toISOString() ?? null,
-      currentPeriodEnd:        sub.currentPeriodEnd?.toISOString() ?? null,
-      cancelAtPeriodEnd:       sub.cancelAtPeriodEnd ?? false,
-      cancelledAt:             sub.cancelledAt?.toISOString() ?? null,
+      trialEndsAt:              sub.trialEndsAt?.toISOString() ?? null,
+      currentPeriodStart:       sub.currentPeriodStart?.toISOString() ?? null,
+      currentPeriodEnd:         sub.currentPeriodEnd?.toISOString() ?? null,
+      cancelAtPeriodEnd:        sub.cancelAtPeriodEnd ?? false,
+      cancelledAt:              sub.cancelledAt?.toISOString() ?? null,
       scheduledPlanSlug,
-      activatedAt:             sub.activatedAt?.toISOString() ?? null,
-      daysUntilRenewal:        daysUntil(sub.currentPeriodEnd),
+      activatedAt:              sub.activatedAt?.toISOString() ?? null,
+      daysUntilRenewal:         daysUntil(sub.currentPeriodEnd),
       paystackSubscriptionCode: sub.paystackSubscriptionCode ?? null,
       paystackEmailToken:       sub.paystackEmailToken ?? null,
+      isPendingActivation,
     };
+    
   } catch (err: any) {
     console.error('[getCurrentSubscription] Error for user', userId, err);
     return null;
