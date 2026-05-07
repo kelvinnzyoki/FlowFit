@@ -90,6 +90,7 @@ export interface CurrentSubscription {
    * via the Paystack API (disable / enable).
    */
   paystackEmailToken:       string | null;
+  isPendingActivation?: boolean;
 }
 
 export interface CheckoutRequest {
