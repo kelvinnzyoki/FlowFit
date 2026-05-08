@@ -157,7 +157,7 @@ app.use('/api/v1', routes);
 app.use('/api/v1/subscriptions', subscriptionRoutes);
 app.use('/api/v1/ai', aiRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
-app.use('/api/v1/admin', adminRoutes);
+//app.use('/api/v1/admin', adminRoutes);
 
 // -----------------------------------------------------------------------------
 // ERROR HANDLING
