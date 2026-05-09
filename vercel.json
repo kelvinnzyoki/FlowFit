@@ -17,6 +17,9 @@
   { "path": "/api/cron/renew",     "schedule": "0 1 * * *"  },
   { "path": "/internal/cron/reconcile", "schedule": "0 3 * * *" },
   { "path": "/api/cron/retry",     "schedule": "0 3 * * *"  },
-  { "path": "/api/cron/expire",    "schedule": "0 2 * * *"  }
+  { "path": "/api/cron/expire",    "schedule": "0 2 * * *"  },
+  {"path": "/api/cron/paystack-reconcile",   "schedule": "*/10 * * * *"}
   ]
 }
+
+
