@@ -402,7 +402,7 @@ model Payment {
 
   provider PaymentProvider @default(PAYSTACK)
 
-  paystackReference String?
+  paystackReference  String?  @unique
   paidAt            DateTime?
 
   mpesaTransactionId String?
