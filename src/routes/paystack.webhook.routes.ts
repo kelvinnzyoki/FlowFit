@@ -520,11 +520,16 @@ async function processChargeSuccess(data: Record<string, any>): Promise<void> {
       select: { monthlyPriceCents: true, yearlyPriceCents: true },
     });
     if (plan) {
-      const expectedKobo = interval === 'YEARLY'
-        ? (plan as { yearlyPriceCents: number | null }).yearlyPriceCents
-        : (plan as { monthlyPriceCents: number | null }).monthlyPriceCents;
+      const expectedKes = interval === 'YEARLY'
+  ? (plan as { mpesaYearlyKes: number | null }).mpesaYearlyKes
+  : (plan as { mpesaMonthlyKes: number | null }).mpesaMonthlyKes;
 
-      if (typeof expectedKobo !== 'number' || expectedKobo <= 0) {
+const expectedKobo =
+  typeof expectedKes === 'number'
+    ? expectedKes * 100
+    : null;
+
+      if (expectedKobo === null || expectedKobo <= 0) {
         console.error(
           `[charge.success FIX-4] Plan price misconfigured for plan ${sub.planId}. ` +
           `Expected DB price in kobo but got ${expectedKobo}. Rejecting activation.`,
