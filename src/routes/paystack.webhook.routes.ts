@@ -967,10 +967,21 @@ async function processEvent(event: PaystackWebhookEvent): Promise<void> {
       if (!sub) return;
 
       if (sub.status === 'TRIALING' && sub.trialEndsAt) {
-        const msLeft = sub.trialEndsAt.getTime() - Date.now();
-        const daysLeft = Math.max(1, Math.ceil(msLeft / 86_400_000));
-        notifyTrialEnding(sub.userId, (sub as any).plan?.name ?? 'your plan', daysLeft)
-          .catch(err => console.error('[Paystack webhook] trial ending notification failed:', err));
+        // ISSUE-2-FIX: Guard trialEndsAt > now so a late-arriving expiring_cards
+        // event for an already-ended trial doesn't say "1 day left" (Math.max clamping).
+        const now2 = new Date();
+        if (sub.trialEndsAt > now2) {
+          const msLeft = sub.trialEndsAt.getTime() - now2.getTime();
+          const daysLeft = Math.max(1, Math.ceil(msLeft / 86_400_000));
+          notifyTrialEnding(sub.userId, (sub as any).plan?.name ?? 'your plan', daysLeft)
+            .catch(err => console.error('[Paystack webhook] trial ending notification failed:', err));
+        }
+      } else if (sub.status === 'ACTIVE') {
+        // ISSUE-2-FIX: Paystack fires expiring_cards so you can warn ACTIVE subscribers
+        // to update their card before renewal fails. Without this notification the card
+        // expires silently, the next charge fails, and you lose the revenue.
+        notifyPaymentFailed(sub.userId, (sub as any).plan?.name ?? 'your plan')
+          .catch(err => console.error('[Paystack webhook] expiring card notification failed:', err));
       }
 
       await prisma.subscriptionLog.create({
