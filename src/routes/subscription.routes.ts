@@ -84,6 +84,10 @@ const billingLimiter = rateLimit({
   message: { error: 'Too many billing requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders:   false,
+  // ISSUE-5-FIX: Key by user ID, not IP. Without this a user behind shared NAT
+  // (corporate network, mobile carrier) gets blocked when another user on the
+  // same IP hits the limit. Matches checkoutLimiter and trialLimiter behaviour.
+  keyGenerator: (req) => (req as any).user?.id ?? req.ip ?? 'anonymous',
 });
 
 const checkoutLimiter = rateLimit({
@@ -149,7 +153,12 @@ function validate(req: Request, res: Response): boolean {
 // Renamed from validateRedirectUrl — same hostname-matching logic applies.
 function validateCallbackUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
-  const allowed = process.env.FRONTEND_URL || process.env.APP_URL || '';
+  // ISSUE-7-FIX: Use only FRONTEND_URL. APP_URL is the API server domain — if
+  // FRONTEND_URL is unset and APP_URL is used instead, Paystack redirects the
+  // user to the API server after payment (which has no subscription.html), the
+  // ?reference= param is lost, and the subscription stays INCOMPLETE forever.
+  // getFrontendUrl() in subscription_service.ts already enforces this; match it here.
+  const allowed = process.env.FRONTEND_URL || '';
   if (!allowed) return undefined;
   try {
     const parsed = new URL(url);
@@ -444,6 +453,18 @@ router.get(
             else d.setMonth(d.getMonth() + 1);
             return d;
           })();
+
+      // ISSUE-3-FIX: Guard against reactivating a terminal row. Both activateWithCodes
+      // and activatePendingPaystackSubscriptionFromCodes have this guard; the direct
+      // fetch-codes path must match. A race between the expiry cron and a user polling
+      // fetch-codes could otherwise reactivate an INCOMPLETE_EXPIRED row.
+      if (['CANCELLED', 'EXPIRED', 'INCOMPLETE_EXPIRED'].includes(sub.status)) {
+        res.status(409).json({
+          success: false,
+          error: 'Subscription has expired and cannot be activated. Please start a new subscription.',
+        });
+        return;
+      }
 
       await prisma.subscription.update({
         where: { id: sub.id },
