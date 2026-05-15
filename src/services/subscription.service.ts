@@ -1054,6 +1054,22 @@ export async function runRetries(): Promise<{
 
    for (const sub of subs) {
     try {
+      // ISSUE-4-FIX: Guard against duplicate STK pushes if cron overlaps itself.
+      // runMpesaRenewals has this guard; runRetries must match it. Without this,
+      // two overlapping retry cron runs each send an STK prompt and the user risks
+      // being charged twice for the same missed payment.
+      const alreadyPending = await prisma.mpesaTransaction.findFirst({
+        where: {
+          subscriptionId: sub.id,
+          status: 'PENDING',
+          timeoutAt: { gt: now },
+        },
+      });
+      if (alreadyPending) {
+        console.log(`[cron/retries] Sub ${sub.id}: STK already PENDING (${alreadyPending.checkoutRequestId}) — skipping`);
+        continue;
+      }
+
       const phone = sub.user.mpesaPhone;
       if (!phone) continue;
  
@@ -1194,7 +1210,7 @@ export async function cancelSubscription(
   ipAddress?:  string,
 ): Promise<CurrentSubscription> {
   const sub = await prisma.subscription.findFirst({
-    where:   { userId, status: { in: ['ACTIVE', 'TRIALING', 'PAST_DUE'] } },
+    where:   { userId, status: { in: ['ACTIVE', 'TRIALING', 'PAST_DUE', 'INCOMPLETE'] } },
     orderBy: { createdAt: 'desc' },
     include: { plan: true },
   });
