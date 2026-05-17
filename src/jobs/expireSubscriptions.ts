@@ -75,6 +75,12 @@ export async function expireStaleSubscriptions(): Promise<void> {
       await new Promise(resolve => setTimeout(resolve, 650)); // Paystack: ~100 req/min
       // AUDIT-FIX-11: Paystack status checks are throttled under the published rate limit.
       const psStatus = await fetchPaystackSubscriptionStatus(sub.paystackSubscriptionCode);
+      // If Paystack cannot be reached or returns an unknown response, do not expire
+      // the user during an external provider/API outage. Retry on the next cron run.
+      if (psStatus === null) {
+        console.warn(`[expireJob] Skipping trial subscription ${sub.id} — Paystack status check failed; will retry later.`);
+        continue;
+      }
       // Paystack confirms subscription is live — do not expire it from our side.
       // ('active' covers both paying and still-in-trial-window subscriptions on Paystack)
       if (psStatus === 'active') continue;
