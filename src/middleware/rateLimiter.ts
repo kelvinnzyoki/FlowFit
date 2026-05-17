@@ -1,4 +1,4 @@
-import { rateLimit } from 'express-rate-limit';
+import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import redis from '../config/redis.js';
 
@@ -29,12 +29,12 @@ export const standardLimiter = rateLimit({
 
 export const authLimiter = rateLimit({
   windowMs:             60 * 60 * 1000,
-  max:                  1000,
+  max:                  20,
   standardHeaders:      true,
   legacyHeaders:        false,
   skipSuccessfulRequests: true,
   skip:                 (req) => req.method === 'OPTIONS',
-  keyGenerator:         (req) => `auth:${req.ip}-${req.body?.email ?? 'unknown'}`,
+  keyGenerator:         (req) => `auth:${ipKeyGenerator(req.ip)}-${String(req.body?.email ?? 'unknown').toLowerCase()}`,
   store:                buildStore(),
   message:              { status: 429, message: 'Too many login attempts. Please try again in an hour.' },
 });

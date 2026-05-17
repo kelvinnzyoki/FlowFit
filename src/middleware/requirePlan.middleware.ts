@@ -34,7 +34,7 @@ export function requirePlan(requiredPlan: PlanSlug) {
           code:       'PLAN_INSUFFICIENT',
           currentPlan: userPlanSlug,
           requiredPlan,
-          upgradeUrl: '/subscription.html',
+          upgradeUrl: '/subscription',
         });
         return;
       }
@@ -70,6 +70,22 @@ export function loadSubscription() {
   };
 }
 
+
+function parsePlanFeatures(features: unknown): string[] {
+  if (Array.isArray(features)) return features.map(String);
+  if (features && typeof features === 'object') return Object.values(features as Record<string, unknown>).map(String);
+  if (typeof features !== 'string' || !features.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(features);
+    if (Array.isArray(parsed)) return parsed.map(String);
+    if (parsed && typeof parsed === 'object') return Object.values(parsed as Record<string, unknown>).map(String);
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 function buildSubscriptionPayload(subscription: any) {
   return {
     id:       subscription.id,
@@ -89,9 +105,7 @@ function buildSubscriptionPayload(subscription: any) {
       hasPersonalCoaching:   subscription.plan.hasPersonalCoaching,
       hasNutritionTracking:  subscription.plan.hasNutritionTracking,
       hasOfflineAccess:      subscription.plan.hasOfflineAccess,
-      features: Array.isArray(subscription.plan.features)
-        ? subscription.plan.features as string[]
-        : JSON.parse(subscription.plan.features as string),
+      features: parsePlanFeatures(subscription.plan.features),
       displayOrder: subscription.plan.displayOrder,
       isPopular:    subscription.plan.isPopular,
     },

@@ -2,7 +2,13 @@ import { Request, Response, NextFunction, RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/db.js';
 
-const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'change_me_access';
+const JWT_ACCESS_SECRET = (() => {
+  const secret = process.env.JWT_ACCESS_SECRET;
+  if (!secret) {
+    throw new Error('JWT_ACCESS_SECRET env var is required. Refusing to start with an unsafe fallback secret.');
+  }
+  return secret;
+})();
 
 // JWT_REFRESH_SECRET is no longer imported here — the middleware only ever
 // verifies access tokens. The /refresh endpoint in auth_routes.ts is the

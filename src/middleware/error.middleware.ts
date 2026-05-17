@@ -13,10 +13,12 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
   // Log the error for the admin (you) to see in Vercel logs
   logger.error(`${err.message} - ${req.method} ${req.originalUrl} - IP: ${req.ip}`);
 
+  const isProduction = process.env.NODE_ENV === 'production';
+
   res.status(statusCode).json({
     status: 'error',
-    message: err.message,
+    message: isProduction ? 'Internal server error.' : err.message,
     // Only show stack trace in development mode
-    stack: process.env.NODE_ENV === 'production' ? '🥞' : err.stack,
+    stack: isProduction ? '🥞' : err.stack,
   });
 };
