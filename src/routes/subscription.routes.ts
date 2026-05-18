@@ -184,14 +184,85 @@ router.get('/plans', async (_req, res) => {
 });
 
 // ─── GET /subscriptions/current ──────────────────────────────────────────────
+function toCurrentRoutePublicPlan(plan: any) {
+  if (!plan) {
+    return {
+      id: '',
+      slug: 'free',
+      name: 'Free',
+      description: null,
+      monthlyPriceCents: 0,
+      yearlyPriceCents: 0,
+      trialDays: 0,
+      maxWorkoutsPerMonth: 10,
+      maxPrograms: 2,
+      hasAdvancedAnalytics: false,
+      hasPersonalCoaching: false,
+      hasNutritionTracking: false,
+      hasOfflineAccess: false,
+      features: ['10 workouts/month', '2 programs/month', 'AI workout generator'],
+      displayOrder: 0,
+      isPopular: false,
+    };
+  }
+
+  return {
+    id:                   plan.id || '',
+    slug:                 plan.slug || 'free',
+    name:                 plan.name || 'Free',
+    description:          plan.description || null,
+    monthlyPriceCents:    plan.monthlyPriceCents || 0,
+    yearlyPriceCents:     plan.yearlyPriceCents || 0,
+    trialDays:            plan.trialDays || 0,
+    maxWorkoutsPerMonth:  plan.maxWorkoutsPerMonth ?? 10,
+    maxPrograms:          plan.maxPrograms ?? 2,
+    hasAdvancedAnalytics: plan.hasAdvancedAnalytics ?? false,
+    hasPersonalCoaching:  plan.hasPersonalCoaching ?? false,
+    hasNutritionTracking: plan.hasNutritionTracking ?? false,
+    hasOfflineAccess:     plan.hasOfflineAccess ?? false,
+    features:             Array.isArray(plan.features)
+                            ? plan.features
+                            : typeof plan.features === 'string'
+                              ? JSON.parse(plan.features || '[]')
+                              : [],
+    displayOrder:         plan.displayOrder || 0,
+    isPopular:            plan.isPopular ?? false,
+  };
+}
+
+async function getFreePlanForCurrentRoute() {
+  const freePlan = await prisma.plan.findUnique({
+    where: { slug: 'free' },
+  });
+
+  return toCurrentRoutePublicPlan(freePlan);
+}
+
 router.get('/current', requireAuth, async (req: Request, res: Response) => {
   try {
     const sub = await getCurrentSubscription(req.user!.id);
-    res.json({ success: true, subscription: sub ?? null });
+
+    if (sub) {
+      res.json({
+        success: true,
+        subscription: sub,
+        plan: sub.plan,
+      });
+      return;
+    }
+
+    const plan = await getFreePlanForCurrentRoute();
+
+    res.json({
+      success: true,
+      subscription: null,
+      plan,
+    });
   } catch (err: any) {
     const msg = (err?.message ?? '').toLowerCase();
     if (msg.includes('not found') || msg.includes('no subscription') || msg.includes('no active')) {
-      res.json({ success: true, subscription: null });
+      const plan = await getFreePlanForCurrentRoute();
+      res.json({ success: true, subscription: null, plan });
       return;
     }
     res.status(500).json({ success: false, error: 'Failed to fetch subscription' });
