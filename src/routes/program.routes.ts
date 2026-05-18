@@ -11,6 +11,68 @@ function getAuthUserId(req: Request): string | null {
   return r.user?.id || r.userId || r.auth?.userId || r.authUser?.id || null;
 }
 
+
+function monthStartUtc(d = new Date()): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
+}
+
+const QUOTA_ACTIVE_STATUSES = ['ACTIVE', 'TRIALING', 'GRACE_PERIOD'] as const;
+
+async function getProgramQuotaState(userId: string) {
+  const monthStart = monthStartUtc();
+
+  const subscription = await prisma.subscription.findFirst({
+    where: {
+      userId,
+      status: { in: QUOTA_ACTIVE_STATUSES as any },
+    },
+    orderBy: { createdAt: 'desc' },
+    include: { plan: true },
+  });
+
+  const planSlug = subscription?.plan?.slug || 'free';
+  if (planSlug !== 'free') {
+    return { enforce: false, planSlug, max: Number.POSITIVE_INFINITY, used: 0, remaining: Number.POSITIVE_INFINITY, monthStart };
+  }
+
+  const freePlan = subscription?.plan || await prisma.plan.findUnique({ where: { slug: 'free' } });
+  const max = freePlan?.maxPrograms ?? 2;
+
+  // Monthly usage = first-time enrollments started this month + restart attempts this month.
+  // Completed/inactive rows remain counted; this prevents users from finishing/cancelling
+  // and immediately regaining Free slots before the month rolls over.
+  const [initialEnrollmentsThisMonth, restartsThisMonth] = await Promise.all([
+    prisma.programEnrollment.count({
+      where: {
+        userId,
+        createdAt: { gte: monthStart },
+      },
+    }),
+    prisma.programEnrollmentUsage.count({
+      where: {
+        userId,
+        createdAt: { gte: monthStart },
+      },
+    }),
+  ]);
+
+  const used = initialEnrollmentsThisMonth + restartsThisMonth;
+  return { enforce: true, planSlug, max, used, remaining: Math.max(0, max - used), monthStart };
+}
+
+function quotaExceededResponse(res: Response, quota: Awaited<ReturnType<typeof getProgramQuotaState>>) {
+  res.status(403).json({
+    success: false,
+    error: `Free plan allows ${quota.max} program enrollment${quota.max === 1 ? '' : 's'} per month. Upgrade to Pro or Elite to enroll in more programs.`,
+    code: 'PROGRAM_LIMIT_REACHED',
+    limit: quota.max,
+    used: quota.used,
+    remaining: quota.remaining,
+    resetAt: new Date(Date.UTC(quota.monthStart.getUTCFullYear(), quota.monthStart.getUTCMonth() + 1, 1, 0, 0, 0, 0)).toISOString(),
+    upgradeUrl: '/subscription',
+  });
+}
+
 function requireUserId(req: Request, res: Response): string | null {
   const userId = getAuthUserId(req);
   if (!userId) {
@@ -518,17 +580,38 @@ router.post('/:id/enroll', async (req: Request, res: Response) => {
         return;
       }
 
-      const restarted = await prisma.programEnrollment.update({
-        where: { id: existing.id },
-        data: {
-          startDate:     new Date(),
-          currentWeek:   1,
-          currentDay:    1,
-          completedDays: 0,
-          isActive:      true,
-          completedAt:   null,
-        },
-        include: { program: true },
+      const quota = await getProgramQuotaState(userId);
+      if (quota.enforce && quota.used >= quota.max) {
+        quotaExceededResponse(res, quota);
+        return;
+      }
+
+      const restarted = await prisma.$transaction(async (tx) => {
+        const updated = await tx.programEnrollment.update({
+          where: { id: existing.id },
+          data: {
+            startDate:     new Date(),
+            currentWeek:   1,
+            currentDay:    1,
+            completedDays: 0,
+            isActive:      true,
+            completedAt:   null,
+          },
+          include: { program: true },
+        });
+
+        if (quota.enforce) {
+          await tx.programEnrollmentUsage.create({
+            data: {
+              userId,
+              programId,
+              enrollmentId: existing.id,
+              action: 'RESTART',
+            },
+          });
+        }
+
+        return updated;
       });
 
       res.status(200).json({
@@ -536,6 +619,12 @@ router.post('/:id/enroll', async (req: Request, res: Response) => {
         data: restarted,
         message: 'Program restarted from the beginning.',
       });
+      return;
+    }
+
+    const quota = await getProgramQuotaState(userId);
+    if (quota.enforce && quota.used >= quota.max) {
+      quotaExceededResponse(res, quota);
       return;
     }
 
@@ -612,9 +701,15 @@ router.delete('/enrollments/:enrollmentId', async (req: Request, res: Response) 
       return;
     }
 
-    await prisma.programEnrollment.delete({ where: { id: enrollmentId } });
+    // Soft-cancel instead of deleting. Hard delete erased the monthly Free-plan
+    // usage record and let users regain slots by cancelling/restarting.
+    const cancelled = await prisma.programEnrollment.update({
+      where: { id: enrollmentId },
+      data:  { isActive: false },
+      include: { program: true },
+    });
 
-    res.status(200).json({ success: true, message: 'Enrollment cancelled.' });
+    res.status(200).json({ success: true, data: cancelled, message: 'Enrollment cancelled.' });
   } catch (error) {
     console.error('Cancel enrollment error:', error);
     res.status(500).json({ success: false, error: 'Failed to cancel enrollment.' });

@@ -8,6 +8,46 @@ const router = Router();
 
 router.use(authenticate);
 
+async function resolveLoggableExerciseId(rawExerciseId: string, body: any): Promise<string> {
+  const exerciseId = String(rawExerciseId || '').trim();
+  if (!exerciseId) throw new Error('exerciseId is required.');
+
+  const existing = await prisma.exercise.findUnique({ where: { id: exerciseId } });
+  if (existing) return existing.id;
+
+  // If the frontend accidentally sent a DayExercise.id, map it to the linked
+  // Exercise.id when available. This fixes DB-backed program days.
+  const dayExercise = await prisma.dayExercise.findUnique({
+    where: { id: exerciseId },
+    include: { exercise: true },
+  });
+  if (dayExercise?.exerciseId && dayExercise.exercise) return dayExercise.exerciseId;
+
+  // AI/custom day exercises may not map to a library Exercise. WorkoutLog.exerciseId
+  // is required by schema, so create a safe custom Exercise record and log against it.
+  const customName =
+    body.exerciseName ||
+    body.name ||
+    dayExercise?.exerciseName ||
+    'Custom Program Exercise';
+
+  const customCategory = body.category || 'CUSTOM';
+  const customCalories = Number(body.caloriesPerMin ?? body.calories_per_min ?? 0);
+
+  const created = await prisma.exercise.create({
+    data: {
+      id: exerciseId,
+      name: String(customName).slice(0, 120),
+      description: 'Auto-created from program workout logging because no library Exercise was linked.',
+      category: String(customCategory).slice(0, 60),
+      caloriesPerMin: Number.isFinite(customCalories) && customCalories >= 0 ? customCalories : 0,
+      isActive: true,
+    },
+  });
+
+  return created.id;
+}
+
 // ─── POST /api/v1/progress ───────────────────────────────────────────────────
 // Called by: ProgressAPI.logWorkout(workoutData)
 // Schema fields on WorkoutLog: exerciseId, duration, date, sets, reps,
@@ -35,10 +75,12 @@ router.post('/', async (req: AuthRequest, res: Response) => {
       return;
     }
 
+    const resolvedExerciseId = await resolveLoggableExerciseId(exerciseId, req.body);
+
     const log = await prisma.workoutLog.create({
       data: {
         userId,
-        exerciseId,
+        exerciseId: resolvedExerciseId,
         duration:       parseInt(duration),
         sets:           sets           ? parseInt(sets)             : null,
         reps:           reps           ? parseInt(reps)             : null,

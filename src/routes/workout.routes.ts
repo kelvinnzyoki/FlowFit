@@ -9,14 +9,12 @@ router.use(authenticate);
 // ─── GET /api/v1/workouts ────────────────────────────────────────────────────
 // Called by: WorkoutsAPI.getExercises(filters)
 // Schema model: Exercise (not Workout — your schema uses Exercise for the library)
-// Supports: ?category=&difficulty=&muscle=&equipment=&limit=&page=
+// Supports schema-safe filters: ?category=&q=&limit=&page=
 router.get('/', async (req: Request, res: Response) => {
   try {
     const {
       category,
-      difficulty,
-      muscle,
-      equipment,
+      q,
       limit = '20',
       page  = '1',
     } = req.query as Record<string, string>;
@@ -25,11 +23,14 @@ router.get('/', async (req: Request, res: Response) => {
     const skip = (parseInt(page) - 1) * take;
 
     const where: Record<string, unknown> = { isActive: true };
-    if (category)   where.category   = category;
-    if (difficulty) where.difficulty = difficulty;
-    // targetMuscles and equipment are String[] arrays in the schema — use array contains filter
-    if (muscle)     where.targetMuscles = { has: muscle };
-    if (equipment)  where.equipment     = { has: equipment };
+    if (category) where.category = category;
+    if (q) {
+      where.OR = [
+        { name:        { contains: q, mode: 'insensitive' } },
+        { description: { contains: q, mode: 'insensitive' } },
+        { category:    { contains: q, mode: 'insensitive' } },
+      ];
+    }
 
     const [exercises, total] = await Promise.all([
       prisma.exercise.findMany({ where, take, skip, orderBy: { name: 'asc' } }),

@@ -46,9 +46,7 @@ import progressRoutes     from './progress.routes.js';
 import userRoutes         from './user.routes.js';
 import subscriptionRoutes from './subscription.routes.js';
 //import seedRouter from './seed.routes.js';
-import exerciseRoutes from './exercise.routes.js';
 import aiRoutes from './ai.routes.js';
-import workoutGeneratorRoutes from './ai.routes.js';   // or rename file to workoutGenerator.routes.ts
 import feedbackRoutes from './feedback.routes.js';
 import adminRoutes from './admin.routes.js';
 
@@ -75,12 +73,12 @@ router.use('/auth', authRoutes);
 
 // ─── Protected resource routes ───────────────────────────────────────────────
 // JWT authentication is applied inside each router via authenticate middleware
+router.use('/workouts',       workoutRoutes);
 router.use('/exercises',      workoutRoutes);
 router.use('/programs',      programRoutes);
 router.use('/progress',      progressRoutes);
 router.use('/users',         userRoutes);
 router.use('/subscriptions', subscriptionRoutes);
-router.use('/exercises', exerciseRoutes);
 router.use('/ai', aiRoutes);
 router.use('/feedback', feedbackRoutes);
 router.use('/admin', adminRoutes);
