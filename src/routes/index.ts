@@ -49,7 +49,7 @@ import subscriptionRoutes from './subscription.routes.js';
 import exerciseRoutes from './exercise.routes.js';
 import aiRoutes from './ai.routes.js';
 import workoutGeneratorRoutes from './ai.routes.js';   // or rename file to workoutGenerator.routes.ts
-import feedbackRoutes from './routes/feedback.routes.js';
+import feedbackRoutes from './feedback.routes.js';
 
 
    
