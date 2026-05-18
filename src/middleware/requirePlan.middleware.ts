@@ -4,7 +4,7 @@ import prisma from '../config/db.js';
 import type { PlanSlug } from '../types/subscription.types.js';
 import { planMeetsRequirement } from '../types/subscription.types.js';
 
-const ACTIVE_STATUSES: SubscriptionStatus[] = ['ACTIVE', 'TRIALING', 'PAST_DUE'];
+const ACTIVE_STATUSES: SubscriptionStatus[] = ['ACTIVE', 'TRIALING', 'GRACE_PERIOD'];
 
 // Gate a route behind a minimum plan — usage: router.get('/route', requireAuth, requirePlan('pro'), handler)
 export function requirePlan(requiredPlan: PlanSlug) {
@@ -41,8 +41,8 @@ export function requirePlan(requiredPlan: PlanSlug) {
 
       req.activeSubscription = buildSubscriptionPayload(subscription);
 
-      if (subscription.status === 'PAST_DUE') {
-        res.setHeader('X-Subscription-Warning', 'PAST_DUE');
+      if (subscription.status === 'GRACE_PERIOD') {
+        res.setHeader('X-Subscription-Warning', 'GRACE_PERIOD');
       }
 
       next();
