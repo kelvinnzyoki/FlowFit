@@ -155,6 +155,7 @@ model Profile {
   targetWeight        Float?
   fitnessGoal         String?
   fitnessLevel        String?
+  region              String?
   timezone            String?
   avatarUrl           String?
   onboardingCompleted Boolean   @default(false)
