@@ -37,7 +37,7 @@ router.put('/me', async (req: Request, res: Response) => {
       name, email,
       firstName, lastName, dateOfBirth, gender,
       height, weight, targetWeight,
-      fitnessGoal, fitnessLevel, timezone, avatarUrl, bio,
+      fitnessGoal, fitnessLevel, region, timezone, avatarUrl, bio,
     } = req.body;
 
     if (email) {
@@ -72,6 +72,7 @@ router.put('/me', async (req: Request, res: Response) => {
           ...(targetWeight !== undefined && { targetWeight: parseFloat(targetWeight) }),
           ...(fitnessGoal  !== undefined && { fitnessGoal }),
           ...(fitnessLevel !== undefined && { fitnessLevel }),
+          ...(region       !== undefined && { region }),
           ...(timezone     !== undefined && { timezone }),
           ...(avatarUrl    !== undefined && { avatarUrl }),
           ...(bio          !== undefined && { bio }),
@@ -87,6 +88,7 @@ router.put('/me', async (req: Request, res: Response) => {
           targetWeight: targetWeight ? parseFloat(targetWeight) : null,
           fitnessGoal:  fitnessGoal  ?? null,
           fitnessLevel: fitnessLevel ?? null,
+          region:       region       ?? null,
           timezone:     timezone     ?? null,
           avatarUrl:    avatarUrl    ?? null,
           bio:          bio          ?? null,
