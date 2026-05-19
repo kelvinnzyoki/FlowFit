@@ -20,6 +20,138 @@ const MAX_RETRIES      = 3;
 const MAX_EMBEDDINGS   = 200;
 const EMBED_DIMS       = 512;
 
+const VALID_REGIONS = ['Africa', 'North America', 'South America', 'Europe', 'Asia', 'Australia'] as const;
+
+type AthleteRegion = typeof VALID_REGIONS[number];
+
+interface RegionalMealGuide {
+  label: string;
+  breakfast: string;
+  lunch: string;
+  dinner: string;
+  snack: string;
+  preWorkout: string;
+  postWorkout: string;
+  proteins: string;
+  fatLoss: string;
+  muscleGain: string;
+}
+
+function normalizeRegion(input?: string | null): AthleteRegion {
+  const raw = String(input ?? '').trim().toLowerCase();
+  if (!raw) return 'Africa';
+
+  if (raw.includes('africa') || raw.includes('nairobi') || raw.includes('lagos') || raw.includes('cairo')) return 'Africa';
+  if (raw.includes('north') || raw.includes('america/new') || raw.includes('america/los') || raw.includes('canada') || raw.includes('usa') || raw.includes('us/')) return 'North America';
+  if (raw.includes('south') || raw.includes('brazil') || raw.includes('argentina') || raw.includes('america/sao') || raw.includes('america/buenos')) return 'South America';
+  if (raw.includes('europe') || raw.includes('london') || raw.includes('berlin') || raw.includes('paris') || raw.includes('rome')) return 'Europe';
+  if (raw.includes('asia') || raw.includes('tokyo') || raw.includes('shanghai') || raw.includes('kolkata') || raw.includes('singapore') || raw.includes('dubai')) return 'Asia';
+  if (raw.includes('australia') || raw.includes('sydney') || raw.includes('melbourne') || raw.includes('oceania')) return 'Australia';
+
+  const exact = VALID_REGIONS.find(r => r.toLowerCase() === raw);
+  return exact ?? 'Africa';
+}
+
+function getRegionalMealGuide(regionInput?: string | null): RegionalMealGuide {
+  const region = normalizeRegion(regionInput);
+  const guides: Record<AthleteRegion, RegionalMealGuide> = {
+    Africa: {
+      label: 'Africa',
+      breakfast: 'eggs with sukuma wiki or spinach, tea with little/no sugar, and a small portion of sweet potato or oats',
+      lunch: 'ugali or rice with grilled chicken, fish, beans, or beef stew plus vegetables',
+      dinner: 'fish, beans, lentils, or eggs with sukuma wiki, cabbage, or mixed vegetables',
+      snack: 'banana, groundnuts, yoghurt, milk, avocado, or fruit',
+      preWorkout: 'banana + 2 boiled eggs, or githeri + water 1–2 hours before training',
+      postWorkout: 'milk + eggs + banana, or chicken/fish with rice or ugali within 45 minutes',
+      proteins: 'eggs, fish, chicken, beef, milk, beans, lentils, green grams, and groundnuts',
+      fatLoss: 'eggs, fish, beans, sukuma wiki, cabbage, cucumber, tomatoes, and controlled ugali/rice portions',
+      muscleGain: 'ugali, rice, beef stew, chicken, eggs, milk, beans, lentils, avocado, and groundnuts',
+    },
+    'North America': {
+      label: 'North America',
+      breakfast: 'Greek yoghurt with oats and berries, eggs with whole-grain toast, or a protein smoothie',
+      lunch: 'grilled chicken/turkey bowl with rice or potatoes, beans, salad, and olive-oil dressing',
+      dinner: 'salmon, lean beef, chicken, tofu, or beans with potatoes/rice and vegetables',
+      snack: 'Greek yoghurt, cottage cheese, fruit, peanut butter toast, protein shake, or nuts',
+      preWorkout: 'banana + Greek yoghurt, or toast with peanut butter 1–2 hours before training',
+      postWorkout: 'protein shake + banana, or chicken/turkey rice bowl within 45 minutes',
+      proteins: 'eggs, Greek yoghurt, cottage cheese, chicken, turkey, salmon, tuna, lean beef, tofu, beans, and whey',
+      fatLoss: 'lean meats, Greek yoghurt, eggs, beans, vegetables, berries, salads, potatoes, and controlled oils/snacks',
+      muscleGain: 'rice, potatoes, oats, lean beef, salmon, chicken, Greek yoghurt, peanut butter, nuts, and smoothies',
+    },
+    'South America': {
+      label: 'South America',
+      breakfast: 'eggs with arepa or oats, fruit, and yoghurt or milk',
+      lunch: 'rice and beans with grilled chicken, fish, lean beef, salad, and avocado',
+      dinner: 'fish/chicken/lean beef with cassava, rice, beans, vegetables, or quinoa',
+      snack: 'fruit, yoghurt, nuts, avocado, milk, or a small cheese sandwich',
+      preWorkout: 'banana + yoghurt, or arepa with eggs 1–2 hours before training',
+      postWorkout: 'rice and beans with chicken/fish, or milk/yoghurt + fruit within 45 minutes',
+      proteins: 'eggs, chicken, fish, lean beef, beans, lentils, yoghurt, milk, and cheese',
+      fatLoss: 'chicken, fish, eggs, beans, salad, vegetables, fruit, and controlled rice/arepa/cassava portions',
+      muscleGain: 'rice, beans, cassava, arepa, beef, chicken, eggs, milk, avocado, and nuts',
+    },
+    Europe: {
+      label: 'Europe',
+      breakfast: 'eggs with whole-grain toast, oats with yoghurt, or cottage cheese with fruit',
+      lunch: 'chicken, tuna, eggs, beans, or tofu with potatoes/rice, salad, and vegetables',
+      dinner: 'fish, lean meat, lentils, or tofu with potatoes, pasta/rice, and vegetables',
+      snack: 'Greek yoghurt, cottage cheese, fruit, nuts, rye bread, or milk',
+      preWorkout: 'banana + yoghurt, or toast with eggs 1–2 hours before training',
+      postWorkout: 'Greek yoghurt + fruit, or fish/chicken with potatoes or rice within 45 minutes',
+      proteins: 'eggs, fish, chicken, lean beef, Greek yoghurt, cottage cheese, lentils, beans, tofu, and milk',
+      fatLoss: 'fish, eggs, Greek yoghurt, beans, lentils, vegetables, salads, potatoes, and controlled bread/pasta portions',
+      muscleGain: 'oats, potatoes, rice, pasta, chicken, fish, eggs, yoghurt, milk, nuts, and olive oil',
+    },
+    Asia: {
+      label: 'Asia',
+      breakfast: 'eggs with rice/congee, tofu, yoghurt, or oats with fruit',
+      lunch: 'rice or noodles with chicken, fish, tofu, eggs, vegetables, and light sauce',
+      dinner: 'fish/chicken/tofu/eggs with rice, stir-fried vegetables, soup, or lentils',
+      snack: 'banana, yoghurt, soy milk, boiled eggs, nuts, fruit, or tofu snack',
+      preWorkout: 'banana + yoghurt/soy milk, or rice with eggs 1–2 hours before training',
+      postWorkout: 'eggs/tofu/chicken with rice, or yoghurt/soy milk + fruit within 45 minutes',
+      proteins: 'eggs, tofu, chicken, fish, prawns, lentils, yoghurt, soy milk, beans, and lean meat',
+      fatLoss: 'eggs, tofu, fish, chicken, vegetables, soup, lentils, and controlled rice/noodle portions',
+      muscleGain: 'rice, noodles, eggs, tofu, chicken, fish, lentils, soy milk, yoghurt, and nuts',
+    },
+    Australia: {
+      label: 'Australia',
+      breakfast: 'eggs with whole-grain toast, oats with Greek yoghurt, or a smoothie with fruit',
+      lunch: 'chicken/tuna bowl with rice or potatoes, salad, beans, and avocado',
+      dinner: 'lean beef, chicken, fish, tofu, or lentils with potatoes/rice and vegetables',
+      snack: 'Greek yoghurt, milk, fruit, nuts, peanut butter toast, cottage cheese, or protein shake',
+      preWorkout: 'banana + Greek yoghurt, or toast with peanut butter 1–2 hours before training',
+      postWorkout: 'protein shake + fruit, or chicken/fish with rice or potatoes within 45 minutes',
+      proteins: 'eggs, chicken, tuna, salmon, lean beef, Greek yoghurt, cottage cheese, tofu, lentils, and milk',
+      fatLoss: 'eggs, tuna, chicken, Greek yoghurt, lentils, salads, vegetables, fruit, and controlled bread/rice portions',
+      muscleGain: 'oats, rice, potatoes, lean beef, chicken, eggs, Greek yoghurt, milk, avocado, nuts, and smoothies',
+    },
+  };
+
+  return guides[region];
+}
+
+function regionalDailyMealSuggestion(ctx: UserContext): string {
+  const guide = getRegionalMealGuide(ctx.region);
+  const goal = (ctx.fitnessGoal ?? '').toLowerCase();
+  const goalNote = goal.includes('loss') || goal.includes('cut')
+    ? `Fat-loss focus: ${guide.fatLoss}.`
+    : goal.includes('muscle') || goal.includes('gain') || goal.includes('bulk')
+    ? `Muscle-building focus: ${guide.muscleGain}.`
+    : `Maintenance/performance focus: balanced protein, vegetables, and workout-timed carbs.`;
+
+  return [
+    `Breakfast: ${guide.breakfast}.`,
+    `Lunch: ${guide.lunch}.`,
+    `Dinner: ${guide.dinner}.`,
+    `Snack: ${guide.snack}.`,
+    goalNote,
+  ].join('\n');
+}
+
+
+
 // ─────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────
@@ -53,6 +185,7 @@ interface UserContext {
   name:           string;
   fitnessGoal:    string;
   fitnessLevel:   string;
+  region:         string;
   weight?:        number;
   targetWeight?:  number;
   height?:        number;
@@ -246,6 +379,7 @@ class AICoachService {
         select: {
           firstName: true, lastName: true,
           fitnessGoal: true, fitnessLevel: true,
+          region: true, timezone: true,
           weight: true, targetWeight: true,
           height: true, gender: true, dateOfBirth: true,
         },
@@ -399,6 +533,7 @@ class AICoachService {
     const age      = typeof ageYears !== 'undefined' ? ageYears : 30;
     const isMale   = (profile?.gender ?? '').toLowerCase() !== 'female';
     const goal     = (profile?.fitnessGoal ?? '').toLowerCase();
+    const region   = normalizeRegion((profile as any)?.region ?? profile?.timezone);
 
     // Mifflin-St Jeor BMR → TDEE (moderate activity 1.55)
     const bmr  = isMale
@@ -437,6 +572,7 @@ class AICoachService {
       name,
       fitnessGoal:  profile?.fitnessGoal  ?? 'general fitness',
       fitnessLevel: profile?.fitnessLevel ?? 'intermediate',
+      region,
       weight:       profile?.weight       ?? undefined,
       targetWeight: profile?.targetWeight ?? undefined,
       height:       profile?.height       ?? undefined,
@@ -469,7 +605,7 @@ class AICoachService {
     const age    = ctx.ageYears ? `, ${ctx.ageYears} yrs` : '';
     const gender = ctx.gender   ? `, ${ctx.gender}` : '';
     lines.push(`ATHLETE: ${ctx.name}${age}${gender}`);
-    lines.push(`GOAL: ${ctx.fitnessGoal} | LEVEL: ${ctx.fitnessLevel} | PLAN: ${ctx.planName}`);
+    lines.push(`GOAL: ${ctx.fitnessGoal} | LEVEL: ${ctx.fitnessLevel} | REGION: ${ctx.region} | PLAN: ${ctx.planName}`);
     if (ctx.weight) {
       const target = ctx.targetWeight ? ` → target ${ctx.targetWeight} kg` : '';
       const change = ctx.weightChange != null ? ` (${ctx.weightChange >= 0 ? '+' : ''}${ctx.weightChange} kg/30 days)` : '';
@@ -517,7 +653,7 @@ class AICoachService {
       const proteinGap = (ctx.dailyProteinTarget ?? 0) - n.protein;
       if (proteinGap > 20) lines.push(`  ⚠ PROTEIN GAP: ${proteinGap}g still needed today`);
     } else {
-      lines.push(`TODAY'S INTAKE: No meals logged yet`);
+      lines.push(`TODAY'S INTAKE: no intake data available; use targets and regional meal guidance for suggestions`);
     }
     if (ctx.nutritionAdherence7d !== undefined) {
       lines.push(`NUTRITION ADHERENCE (7d): ${ctx.nutritionAdherence7d}%`);
@@ -579,10 +715,13 @@ BIOMECHANICS & EXERCISE SCIENCE:
 - Compound-first sequencing: squats/deads/press before isolation work
 - Tempo prescription when correcting form: 3-1-2 (eccentric-pause-concentric)
 
-KENYAN ATHLETE CONTEXT:
-- Default foods: ugali, sukuma wiki, githeri, nyama choma, eggs, milk, beans, avocado
-- Suggest locally available protein sources when giving meal advice
-- Be aware of typical Kenyan meal patterns (2-3 main meals, chai culture)
+REGION-AWARE MEAL CONTEXT:
+- Athlete region: ${ctx.region}
+- Use foods that fit the athlete's region instead of assuming Kenyan/African foods.
+- Regional meal guide: ${regionalDailyMealSuggestion(ctx)}
+- Pre-workout: ${getRegionalMealGuide(ctx.region).preWorkout}
+- Post-workout: ${getRegionalMealGuide(ctx.region).postWorkout}
+- Protein sources: ${getRegionalMealGuide(ctx.region).proteins}
 
 PSYCHOLOGICAL COACHING:
 - Adherence <60: focus entirely on habit, remove friction, celebrate any win
@@ -1105,6 +1244,7 @@ ${this.workoutFuelPlan(ctx, base.title)}`,
 
     const isLoss = goal.includes('loss') || goal.includes('cut');
     const isGain = goal.includes('muscle') || goal.includes('gain') || goal.includes('bulk');
+    const mealGuide = getRegionalMealGuide(ctx.region);
 
     // Meal timing based on workout presence. If no program/log exists for the day,
     // infer the likely workout from goal/history so diet plans still work for users
@@ -1118,45 +1258,41 @@ ${this.workoutFuelPlan(ctx, base.title)}`,
 
     const meals = [
       {
-        name:  'Breakfast (7–8 AM)',
+        name:  'Breakfast',
         foods: isGain
-          ? '4 eggs scrambled + 2 slices bread + 1 cup milk + 1 banana'
+          ? `${mealGuide.breakfast} Add an extra milk/yoghurt serving or nuts for calories.`
           : isLoss
-          ? '3 eggs boiled + sukuma wiki + black tea (no sugar)'
-          : '3 eggs + 2 slices bread + 1 avocado + chai',
-        macros: isGain ? '~520 kcal | P:32g C:45g F:18g' : isLoss ? '~280 kcal | P:22g C:8g F:16g' : '~420 kcal | P:24g C:36g F:18g',
+          ? `${mealGuide.breakfast} Keep carbs controlled and prioritise protein.`
+          : mealGuide.breakfast,
+        macros: isGain ? '~500–650 kcal | P:30–40g' : isLoss ? '~280–420 kcal | P:22–35g' : '~400–550 kcal | P:25–35g',
       },
       {
         name:  hasWorkoutToday ? 'Pre-Workout (1–2h before training)' : 'Mid-Morning Snack',
-        foods: hasWorkoutToday
-          ? '1 cup githeri + 1 banana + 250 ml water'
-          : '1 cup milk + 1 handful groundnuts',
-        macros: hasWorkoutToday ? '~380 kcal | P:14g C:62g F:6g' : '~220 kcal | P:10g C:12g F:14g',
+        foods: hasWorkoutToday ? mealGuide.preWorkout : mealGuide.snack,
+        macros: hasWorkoutToday ? '~250–420 kcal | carbs + protein' : '~180–300 kcal | protein/fibre focus',
       },
       {
-        name:  'Lunch (1–2 PM)',
+        name:  'Lunch',
         foods: isGain
-          ? 'Ugali (4 pieces) + beef stew 150g + sukuma wiki + avocado'
+          ? `${mealGuide.lunch} Use a larger carb portion and add healthy fats.`
           : isLoss
-          ? 'Brown rice 1 cup + grilled chicken 120g + cucumber + tomato salad'
-          : 'Ugali (2 pieces) + chicken 100g + mixed vegetables',
-        macros: isGain ? '~780 kcal | P:42g C:88g F:22g' : isLoss ? '~420 kcal | P:35g C:48g F:8g' : '~580 kcal | P:32g C:68g F:14g',
+          ? `${mealGuide.lunch} Use a palm-sized protein serving and a controlled carb portion.`
+          : mealGuide.lunch,
+        macros: isGain ? '~650–850 kcal | P:35–50g' : isLoss ? '~380–550 kcal | P:30–45g' : '~500–700 kcal | P:30–45g',
       },
       {
         name:  hasWorkoutToday ? 'Post-Workout (within 45 min)' : 'Afternoon Snack',
-        foods: hasWorkoutToday
-          ? '2 boiled eggs + 1 cup milk + 1 banana — prioritise within 45 min of session'
-          : '1 cup yoghurt + fruit',
-        macros: hasWorkoutToday ? '~320 kcal | P:24g C:34g F:10g' : '~180 kcal | P:8g C:28g F:4g',
+        foods: hasWorkoutToday ? mealGuide.postWorkout : mealGuide.snack,
+        macros: hasWorkoutToday ? '~300–500 kcal | 30–50g protein + carbs' : '~180–300 kcal',
       },
       {
-        name:  'Dinner (7–8 PM)',
+        name:  'Dinner',
         foods: isGain
-          ? 'Rice 1.5 cups + lentils 1 cup + beef 100g + avocado'
+          ? `${mealGuide.dinner} Add an extra carb serving if your appetite allows.`
           : isLoss
-          ? 'Sukuma wiki + 2 eggs + 1 cup beans (no ugali) + lemon water'
-          : 'Ugali (2 pieces) + fish 100g + sukuma wiki',
-        macros: isGain ? '~680 kcal | P:38g C:82g F:18g' : isLoss ? '~340 kcal | P:28g C:32g F:10g' : '~480 kcal | P:28g C:56g F:12g',
+          ? `${mealGuide.dinner} Keep dinner lighter if calories are tight.`
+          : mealGuide.dinner,
+        macros: isGain ? '~600–800 kcal | P:35–50g' : isLoss ? '~320–500 kcal | P:28–42g' : '~450–650 kcal | P:28–42g',
       },
     ];
 
@@ -1172,12 +1308,13 @@ ${this.workoutFuelPlan(ctx, base.title)}`,
     return {
       success: true,
       reply: `Personalised Nutrition Plan — ${ctx.fitnessGoal.toUpperCase()}\n\n` +
+        `Region: ${mealGuide.label}\n` +
         `Workout basis: ${predictedWorkout}\n\n` +
         `Daily Targets: ${cal} kcal | Protein: ${pro}g | Carbs: ${carb}g | Fat: ${fat}g\n` +
         `Hydration: ${hydration} ml/day (${Math.round(hydration/250)} glasses)\n\n` +
         mealLines + '\n\n' +
         `Key Rules:\n${tips}`,
-      data: { targets: { calories: cal, protein: pro, carbs: carb, fat }, meals, predictedWorkout },
+      data: { targets: { calories: cal, protein: pro, carbs: carb, fat }, region: mealGuide.label, meals, predictedWorkout },
     };
   }
 
@@ -1187,27 +1324,32 @@ ${this.workoutFuelPlan(ctx, base.title)}`,
     const weight   = ctx.weight ?? 75;
     const isLoss   = goal.includes('loss') || goal.includes('cut');
     const isGain   = goal.includes('muscle') || goal.includes('gain') || goal.includes('bulk');
+    const mealGuide = getRegionalMealGuide(ctx.region);
 
     // ── Pre/during/post workout questions ─────────────────────────────────────
     if (/before|pre.?workout|pre workout|prior to/.test(question)) {
       return {
         success: true,
-        reply: `**Pre-workout (1–2h before):**\n\n` +
-          `• 1 banana + 2 boiled eggs — fast carbs + protein\n` +
-          `• Or: 1 cup githeri + black tea\n` +
-          `• Or: 2 slices bread + peanut butter\n\n` +
-          `Aim for **30–40g carbs + 20g protein**. Avoid heavy fats — they slow digestion and kill your energy mid-session.`,
+        reply: `Pre-workout (1–2h before)
+
+` +
+          `${mealGuide.preWorkout}.
+
+` +
+          `Aim for 30–40g carbs + 20g protein. Avoid heavy fats because they slow digestion and can reduce training energy.`,
       };
     }
 
     if (/after|post.?workout|post workout|recovery|when.*done|finish/.test(question)) {
       return {
         success: true,
-        reply: `**Post-workout (within 45 min — critical window):**\n\n` +
-          `• 3 boiled eggs + 1 banana + 1 cup milk → ~38g protein\n` +
-          `• Or: 150g nyama choma + ugali (1 piece)\n` +
-          `• Or: 1 cup beans + 2 eggs + chai\n\n` +
-          `Target **40–50g protein + fast carbs**. This is when your muscles absorb nutrients fastest — don't skip it.`,
+        reply: `Post-workout (within 45 min)
+
+` +
+          `${mealGuide.postWorkout}.
+
+` +
+          `Target 40–50g protein + fast carbs so recovery and muscle repair starts immediately.`,
       };
     }
 
@@ -1231,21 +1373,28 @@ ${this.workoutFuelPlan(ctx, base.title)}`,
         ? (ctx.dailyProteinTarget ?? 140) - ctx.todayNutrition.protein
         : ctx.dailyProteinTarget ?? 140;
       const mealsLogged = ctx.todayNutrition?.meals ?? 0;
-
-      const suggestion = isLoss
-        ? `eggs + sukuma wiki + black tea for breakfast, grilled chicken + brown rice for lunch, beans + vegetables for dinner`
-        : isGain
-        ? `4 eggs + bread + milk for breakfast, ugali + beef stew + avocado for lunch, rice + lentils + chicken for dinner`
-        : `3 eggs + avocado + chai for breakfast, ugali + chicken + vegetables for lunch, fish + sukuma wiki for dinner`;
+      const suggestion = regionalDailyMealSuggestion(ctx);
 
       return {
         success: true,
-        reply: `**Today's eating guide — ${ctx.fitnessGoal.toUpperCase()}**\n\n` +
+        reply: `Today's eating guide — ${ctx.fitnessGoal.toUpperCase()}
+
+` +
+          `Region: ${mealGuide.label}
+` +
+          `Targets: ${ctx.dailyCalorieTarget} kcal | ${ctx.dailyProteinTarget}g protein
+` +
           (mealsLogged > 0
-            ? `You've logged ${mealsLogged} meal${mealsLogged !== 1 ? 's' : ''} — **${Math.round(remaining)} kcal** and **${Math.round(proteinLeft)}g protein** remaining.\n\n`
-            : `No meals logged yet — target is **${ctx.dailyCalorieTarget} kcal** and **${ctx.dailyProteinTarget}g protein**.\n\n`) +
-          `Try: ${suggestion}.\n\n` +
-          `Want the full meal plan? Say "give me my full nutrition plan".`,
+            ? `Current intake leaves about ${Math.round(remaining)} kcal and ${Math.round(proteinLeft)}g protein for the rest of today.
+
+`
+            : `Use this as today's suggested plan.
+
+`) +
+          `${suggestion}
+
+` +
+          `For a full timed plan, ask: give me my full nutrition plan.`,
       };
     }
 
@@ -1254,14 +1403,15 @@ ${this.workoutFuelPlan(ctx, base.title)}`,
       const target = ctx.dailyProteinTarget ?? Math.round(weight * 2);
       return {
         success: true,
-        reply: `**Best protein sources for you — ${target}g/day target:**\n\n` +
-          `• Eggs (6g each) — cheapest per gram in Kenya\n` +
-          `• Nyama choma / beef (26g/100g)\n` +
-          `• Tilapia / fish (22g/100g)\n` +
-          `• Milk 1 cup (8g) — easy extra protein\n` +
-          `• Beans / lentils (9g/100g cooked) — pair with eggs to complete amino acids\n` +
-          `• Groundnuts (7g/30g handful)\n\n` +
-          `Hit protein FIRST at every meal before filling up on carbs.`,
+        reply: `Best protein sources for you — ${target}g/day target
+
+` +
+          `Region: ${mealGuide.label}
+` +
+          `${mealGuide.proteins}.
+
+` +
+          `Hit protein first at every meal before filling up on carbs.`,
       };
     }
 
@@ -1269,10 +1419,15 @@ ${this.workoutFuelPlan(ctx, base.title)}`,
     if (/lose|loss|cut|deficit|fat.*burn|burn.*fat|slim/.test(question)) {
       return {
         success: true,
-        reply: `**Best foods for fat loss:**\n\n` +
-          `✅ Eat more: eggs, sukuma wiki, fish, beans, cucumber, tomatoes, black tea\n` +
-          `❌ Cut back: ugali portions, white bread, soda, juice, sugar in chai\n\n` +
-          `Rule: **protein at every meal** (keeps you full + preserves muscle). Reduce ugali to 1–2 pieces per meal instead of 4. You'll hit your ${ctx.dailyCalorieTarget} kcal target without feeling empty.`,
+        reply: `Best foods for fat loss
+
+` +
+          `Region: ${mealGuide.label}
+` +
+          `${mealGuide.fatLoss}.
+
+` +
+          `Rule: protein at every meal. Keep carbs controlled, avoid liquid calories, and aim for your ${ctx.dailyCalorieTarget} kcal target without feeling empty.`,
       };
     }
 
@@ -1280,12 +1435,15 @@ ${this.workoutFuelPlan(ctx, base.title)}`,
     if (/gain|bulk|mass|weight.*up|skinny|underweight/.test(question)) {
       return {
         success: true,
-        reply: `**Best foods to gain muscle mass:**\n\n` +
-          `• Ugali + beef stew + avocado — high cal, easy to eat\n` +
-          `• Whole milk (2–3 cups/day adds ~450 kcal)\n` +
-          `• Groundnuts and avocado — dense calories without feeling stuffed\n` +
-          `• Rice + lentils + chicken — complete amino acid profile\n\n` +
-          `Your target is **${ctx.dailyCalorieTarget} kcal**. The key is consistency — eat even when not hungry. Add groundnuts or avocado to every meal to boost calories without volume.`,
+        reply: `Best foods to gain muscle mass
+
+` +
+          `Region: ${mealGuide.label}
+` +
+          `${mealGuide.muscleGain}.
+
+` +
+          `Your target is ${ctx.dailyCalorieTarget} kcal. The key is consistency: do not skip meals, and add calorie-dense foods when appetite is low.`,
       };
     }
 
@@ -1307,11 +1465,14 @@ ${this.workoutFuelPlan(ctx, base.title)}`,
     if (/squat|deadlift|bench|lift|strength|weights/.test(question)) {
       return {
         success: true,
-        reply: `**Eating for strength training:**\n\n` +
-          `• 2h before: ugali (2 pieces) + 2 eggs or beans — slow carbs + protein\n` +
-          `• Within 45 min after: 3 eggs + milk + banana — repair and grow\n` +
-          `• Daily: hit your **${ctx.dailyProteinTarget ?? Math.round(weight * 2)}g protein** — without it, sessions build nothing\n\n` +
-          `Progressive overload + protein = muscle. You can't out-train a protein deficit.`,
+        reply: `Eating for strength training
+
+` +
+          `Before training: ${mealGuide.preWorkout}.
+` +
+          `After training: ${mealGuide.postWorkout}.
+` +
+          `Daily protein target: ${ctx.dailyProteinTarget ?? Math.round(weight * 2)}g. Progressive overload + protein = muscle.`,
       };
     }
 
@@ -1320,15 +1481,21 @@ ${this.workoutFuelPlan(ctx, base.title)}`,
     const calTarget     = ctx.dailyCalorieTarget ?? 2000;
     return {
       success: true,
-      reply: `**Quick answer for your goal (${ctx.fitnessGoal}):**\n\n` +
-        `Targets: **${calTarget} kcal | ${proteinTarget}g protein** per day.\n\n` +
-        isLoss
-          ? `Focus on: eggs, fish, sukuma wiki, beans. Cut ugali portions in half. Protein first at every meal.`
+      reply: `Quick answer for your goal (${ctx.fitnessGoal})
+
+` +
+        `Region: ${mealGuide.label}
+` +
+        `Targets: ${calTarget} kcal | ${proteinTarget}g protein per day.
+
+` +
+        (isLoss
+          ? `Focus on: ${mealGuide.fatLoss}. Protein first at every meal.`
           : isGain
-          ? `Focus on: ugali + beef + milk + avocado. Never skip meals. Eat within 30 min of waking.`
-          : `Balance carbs around workouts. Protein at every meal. Consistent timing beats perfect eating.`,
+          ? `Focus on: ${mealGuide.muscleGain}. Do not skip meals.`
+          : `Balance carbs around workouts. Protein at every meal. Consistent timing beats perfect eating.`),
     };
-        }
+  }
 
   private macroCalculator(ctx: UserContext): CoachResponse {
     const weight = ctx.weight ?? 75;
@@ -1448,21 +1615,30 @@ ${this.workoutFuelPlan(ctx, base.title)}`,
     try {
       const nutritionLog = (prisma as any).nutritionLog;
       if (!nutritionLog) {
-        return { success: true, reply: `Nutrition tracking isn't set up yet. Run the database migration to enable meal logging.` };
+        return { success: true, reply: `Today's meal suggestion\n\nTargets: ${ctx.dailyCalorieTarget} kcal | ${ctx.dailyProteinTarget}g protein\nRegion: ${getRegionalMealGuide(ctx.region).label}\n\n${regionalDailyMealSuggestion(ctx)}` };
       }
       logs = await nutritionLog.findMany({
         where:   { userId, date: { gte: todayStart } },
         orderBy: { date: 'asc' },
       });
     } catch {
-      return { success: true, reply: `No nutrition logs found. Say "log my breakfast" to start tracking your food.` };
+      return { success: true, reply: `Today's meal suggestion\n\nTargets: ${ctx.dailyCalorieTarget} kcal | ${ctx.dailyProteinTarget}g protein\nRegion: ${getRegionalMealGuide(ctx.region).label}\n\n${regionalDailyMealSuggestion(ctx)}` };
     }
 
     if (!logs.length) {
       const proteinTarget = ctx.dailyProteinTarget ?? 140;
+      const mealGuide = getRegionalMealGuide(ctx.region);
       return {
         success: true,
-        reply: `No meals logged yet today. Your targets: **${ctx.dailyCalorieTarget} kcal** | **${proteinTarget}g protein** | ${ctx.dailyCarbTarget}g carbs | ${ctx.dailyFatTarget}g fat.\n\nStart by logging breakfast — say "log 3 eggs and chai: 320 calories, 22g protein".`,
+        reply: `Today's meal suggestion
+
+` +
+          `Region: ${mealGuide.label}
+` +
+          `Targets: ${ctx.dailyCalorieTarget} kcal | ${proteinTarget}g protein | ${ctx.dailyCarbTarget}g carbs | ${ctx.dailyFatTarget}g fat
+
+` +
+          regionalDailyMealSuggestion(ctx),
       };
     }
 
