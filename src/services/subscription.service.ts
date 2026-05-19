@@ -119,7 +119,7 @@ async function notifySubscriptionAction(
   try {
     // De-dupe action notifications that can be produced by both the direct API
     // call and the Paystack webhook for the same state transition.
-    const since = new Date(Date.now() - 10 * 60 * 1000);
+    const since = new Date(Date.now() - 60 * 60 * 1000); // MINOR-BUG-2: extended to 1 hour
     const existing = await prisma.notification.findFirst({
       where: { userId, type, title, body, createdAt: { gte: since } },
       select: { id: true },
@@ -1253,7 +1253,16 @@ export async function cancelSubscription(
   });
  
   if (!sub) throw new Error('No active subscription found');
- 
+
+  // MINOR-BUG-1: Force immediately=true for INCOMPLETE rows.
+  // There is no billing period to cancel "at end of" on an INCOMPLETE row.
+  // A period-end cancel sets cancelAtPeriodEnd=true without disabling Paystack;
+  // if subscription.create fires later the row activates already flagged for
+  // cancellation — user gets a subscription that ends itself automatically.
+  if (sub.status === 'INCOMPLETE') {
+    immediately = true;
+  }
+
   const prevStatus = sub.status;
 
   let emailToken = sub.paystackEmailToken;
