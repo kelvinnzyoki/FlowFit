@@ -84,7 +84,7 @@ async function notifySubscriptionAction(
   try {
     // De-dupe action notifications that can be produced by both the direct API
     // call and the Paystack webhook for the same state transition.
-    const since = new Date(Date.now() - 10 * 60 * 1000);
+    const since = new Date(Date.now() - 60 * 60 * 1000); // MINOR-BUG-2: extended to 1 hour
     const existing = await prisma.notification.findFirst({
       where: { userId, type, title, body, createdAt: { gte: since } },
       select: { id: true },
