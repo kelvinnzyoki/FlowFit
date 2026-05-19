@@ -593,6 +593,10 @@ PSYCHOLOGICAL COACHING:
 
 ━━ RESPONSE FORMAT — NON-NEGOTIABLE ━━
 - ALWAYS answer what the athlete ACTUALLY ASKED — never redirect to nutrition unless they asked about it
+- Treat an active program as useful context, not a prison. For today's/future workouts, choose the program session only when it is clearly the best answer; otherwise combine program data, logged history, goal, level, streak, fatigue, and metrics.
+- If the athlete has no active program, still give smart training and diet guidance from workout logs, goals, metrics, streak, and level.
+- For diet questions tied to today/future/past workouts, infer the workout from the active program when useful; otherwise predict the likely workout from history and goal, then attach meals around it.
+- For short questions, answer short. For plans, use clean sections and bullets through the relevant tool.
 - "response" field: 1–3 sentences MAX, 60 words hard limit, punchy and direct
 - Use tools for ALL detailed output (plans, history, metrics, nutrition breakdowns)
 - Never put bullet lists or headers inside "response" — that goes in tool output
@@ -607,10 +611,11 @@ OUTPUT — valid JSON only, no markdown, no code fences:
 }
 
 Available tools:
-  TRAINING:   generate_workout | next_workout | program_status | weekly_program
-              workout_history | adaptive_adjustment | body_metrics | achievements
-              streak_info | recovery_plan | log_workout
-  NUTRITION (full): nutrition_plan → only when user asks for a FULL plan, meal schedule, or says "plan my diet"
+  TRAINING:   generate_workout → best/custom/recommended workout using program + history + goal
+              next_workout → today/next workout when the user wants the scheduled or most likely next session
+              program_status | weekly_program | workout_history | adaptive_adjustment
+              body_metrics | achievements | streak_info | recovery_plan | log_workout
+  NUTRITION (full): nutrition_plan → when user asks for a FULL plan, meal schedule, diet plan, or meals for today/future workout/day
               macro_calculator → only when user asks to calculate macros/calories/TDEE
               log_meal → when user wants to log/record food they ate
               nutrition_summary → when user asks how they are doing today, today's intake, progress
@@ -696,75 +701,121 @@ Never invent data. Always reference real numbers from context. "response" is alw
 
   // ── TOOLS ──────────────────────────────────────────────────
 
-  private generateWorkout(ctx: UserContext): CoachResponse {
-  if (ctx.program?.nextExercises.length) {
-    // Already handled by nextWorkout in most cases
-    const list = ctx.program.nextExercises.map(e => `• **${e}**`).join('\n');
+  private getGoalWorkoutBlueprint(ctx: UserContext): { title: string; focus: string; exercises: { name: string; sets: number; reps: string; note?: string }[] } {
+    const goal  = (ctx.fitnessGoal ?? '').toLowerCase();
+    const level = (ctx.fitnessLevel ?? 'intermediate').toLowerCase();
+    const recentCategories = ctx.recentLogs.filter(l => !l.skipped).slice(0, 6).map(l => l.category.toLowerCase());
+    const trainedLowerRecently = recentCategories.some(c => /leg|lower|glute|quad|hamstring/.test(c));
+    const trainedUpperRecently = recentCategories.some(c => /chest|back|shoulder|upper|push|pull/.test(c));
+
+    if (goal.includes('loss') || goal.includes('cut') || goal.includes('fat')) {
+      return {
+        title: 'Fat-Loss Conditioning Session',
+        focus: 'full-body calorie burn while preserving muscle',
+        exercises: [
+          { name: 'Bodyweight Squats', sets: 4, reps: '15', note: 'RPE 7' },
+          { name: 'Push-ups', sets: 4, reps: level === 'beginner' ? '8–10' : '12–15', note: 'strict form' },
+          { name: 'Reverse Lunges', sets: 3, reps: '10 each leg' },
+          { name: 'Mountain Climbers', sets: 4, reps: '30 s' },
+          { name: 'Plank', sets: 3, reps: '40 s' },
+        ],
+      };
+    }
+
+    if (goal.includes('muscle') || goal.includes('gain') || goal.includes('bulk') || goal.includes('strength')) {
+      const lowerBias = !trainedLowerRecently || trainedUpperRecently;
+      return {
+        title: lowerBias ? 'Muscle-Building Lower Body + Core' : 'Muscle-Building Upper Body',
+        focus: 'progressive overload with controlled tempo',
+        exercises: lowerBias ? [
+          { name: 'Goblet Squat', sets: 4, reps: '8–12', note: '3-1-2 tempo' },
+          { name: 'Romanian Deadlift', sets: 4, reps: '10', note: 'hips back' },
+          { name: 'Bulgarian Split Squat', sets: 3, reps: '8 each leg' },
+          { name: 'Calf Raises', sets: 4, reps: '15–20' },
+          { name: 'Plank', sets: 3, reps: '45 s' },
+        ] : [
+          { name: 'Push-ups or Bench Press', sets: 4, reps: '8–12', note: 'stop 1–2 reps before failure' },
+          { name: 'Dumbbell Row', sets: 4, reps: '10 each side' },
+          { name: 'Overhead Press', sets: 3, reps: '8–10' },
+          { name: 'Lateral Raises', sets: 3, reps: '12–15' },
+          { name: 'Dead Bug', sets: 3, reps: '10 each side' },
+        ],
+      };
+    }
+
     return {
-      success: true,
-      reply: `**${ctx.program.name}** — Week ${ctx.program.currentWeek}, Day ${ctx.program.currentDay}\n\n${list}\n\nWarm up 5 min · Rest 60–90 s between sets\n\nTell me when you're done and I'll log it!`,
-      data: { exercises: ctx.program.nextExercises, source: 'program' },
+      title: 'Balanced Maintenance Session',
+      focus: 'strength, mobility, and sustainable consistency',
+      exercises: [
+        { name: 'Dynamic Warm-up', sets: 1, reps: '6 min' },
+        { name: 'Squat Pattern', sets: 3, reps: '10–12' },
+        { name: 'Push-up', sets: 3, reps: '8–12' },
+        { name: 'Hip Hinge / Glute Bridge', sets: 3, reps: '12' },
+        { name: 'Low Plank', sets: 3, reps: '35–45 s' },
+      ],
     };
   }
 
-    type Def = { type: string; exercises: { name: string; sets: number; reps: string }[] };
-    const workouts: Record<string, Def> = {
-      beginner: {
-        type: 'Beginner Full Body',
-        exercises: [
-          { name: 'Push-ups', sets: 3, reps: '8' },
-          { name: 'Bodyweight Squats', sets: 3, reps: '12' },
-          { name: 'Glute Bridge', sets: 3, reps: '12' },
-          { name: 'Plank', sets: 3, reps: '30 s' },
-          { name: 'Mountain Climbers', sets: 3, reps: '20' },
-        ],
-      },
-      intermediate: {
-        type: 'Intermediate Strength',
-        exercises: [
-          { name: 'Push-ups', sets: 4, reps: '15' },
-          { name: 'Goblet Squat', sets: 4, reps: '12' },
-          { name: 'Dumbbell Row', sets: 4, reps: '10 each' },
-          { name: 'Romanian Deadlift', sets: 3, reps: '12' },
-          { name: 'Plank', sets: 3, reps: '45 s' },
-          { name: 'Lateral Raises', sets: 3, reps: '15' },
-        ],
-      },
-      advanced: {
-        type: 'Advanced Strength & Power',
-        exercises: [
-          { name: 'Barbell Squat', sets: 5, reps: '5' },
-          { name: 'Bench Press', sets: 5, reps: '5' },
-          { name: 'Barbell Deadlift', sets: 4, reps: '4' },
-          { name: 'Pull-ups', sets: 4, reps: '8' },
-          { name: 'Overhead Press', sets: 4, reps: '6' },
-          { name: 'Farmer Carry', sets: 3, reps: '40 m' },
-        ],
-      },
+  private workoutFuelPlan(ctx: UserContext, workoutTitle = "today's workout"): string {
+    const goal = (ctx.fitnessGoal ?? '').toLowerCase();
+    const protein = ctx.dailyProteinTarget ?? Math.round((ctx.weight ?? 75) * 2);
+    const isLoss = goal.includes('loss') || goal.includes('cut') || goal.includes('fat');
+    const isGain = goal.includes('muscle') || goal.includes('gain') || goal.includes('bulk');
+
+    const pre = isLoss
+      ? '1 banana + 2 boiled eggs, or black tea + eggs if training light'
+      : isGain
+      ? 'Githeri or oats + banana + milk 60–90 min before training'
+      : 'Banana + yoghurt or milk 60–90 min before training';
+
+    const post = isLoss
+      ? 'Grilled chicken/fish + sukuma wiki + small rice portion'
+      : isGain
+      ? 'Ugali or rice + beef/eggs/beans + avocado within 45–90 min'
+      : 'Fish/eggs/beans + ugali or rice + vegetables';
+
+    return `Fuel for ${workoutTitle}:
+• Pre-workout: ${pre}
+• Post-workout: ${post}
+• Protein target today: ${protein}g`;
+  }
+
+  private generateWorkout(ctx: UserContext): CoachResponse {
+    const custom = this.getGoalWorkoutBlueprint(ctx);
+    const exerciseLines = custom.exercises.map(e =>
+      `• ${e.name} — ${e.sets}×${e.reps}${e.note ? ` (${e.note})` : ''}`
+    ).join('\n');
+
+    const programNote = ctx.program?.nextExercises.length
+      ? `\n\nProgram context: your active program has ${ctx.program.nextExercises.join(', ')} next. I am recommending this session because it better fits your goal/history right now.`
+      : ctx.recentLogs.length
+      ? `\n\nBased on your recent logs, this fills the most useful training gap for your ${ctx.fitnessGoal} goal.`
+      : `\n\nNo active program needed — this is built from your goal, level, and current profile.`;
+
+    const volNote = ctx.volumeChangePct < -10
+      ? `\n\nVolume is down ${Math.abs(ctx.volumeChangePct)}% — complete the session before adding intensity.`
+      : ctx.volumeChangePct > 15
+      ? `\n\nVolume is up ${ctx.volumeChangePct}% — keep RPE around 7–8 to avoid overreaching.`
+      : '';
+
+    const reply = `${custom.title}\n\nFocus: ${custom.focus}\n\nWorkout:\n${exerciseLines}${programNote}${volNote}\n\n${this.workoutFuelPlan(ctx, custom.title)}\n\nWarm up 5–7 min. Rest 60–90 s. Tell me when you finish and I can log it.`;
+
+    return {
+      success: true,
+      reply,
+      data: { workout: custom, source: ctx.program ? 'program_history_goal' : 'history_goal_profile' },
     };
-
-    const w = workouts[ctx.fitnessLevel] ?? workouts['intermediate'];
-
-  const exercisesList = w.exercises.map(e =>
-    `• **${e.name}** — ${e.sets}×${e.reps}`
-  ).join('\n');
-
-  const volNote = ctx.volumeChangePct < -10
-    ? `\n\n📉 Volume is down — focus on completing every set today.`
-    : ctx.volumeChangePct > 15 ? `\n\n📈 Great momentum! Build on it.` : '';
-
-  const reply = `**${w.type}** — ${ctx.fitnessGoal.toUpperCase()}\n\n${exercisesList}${volNote}\n\nWarm up 5 min · Rest 60–90 s between sets\n\nTell me when you finish and I'll log it!`;
-
-  return {
-    success: true,
-    reply,
-    data: { workout: w, source: 'profile' },
-  };
   }
 
   private async nextWorkout(userId: string, ctx: UserContext): Promise<CoachResponse> {
   if (!ctx.program) {
-    return { success: true, reply: `You're not enrolled in a program. Want a custom session? Just say "give me a workout".` };
+    const generated = this.generateWorkout(ctx);
+    return {
+      ...generated,
+      reply: `You are not enrolled in a program, so I used your goal, level, workout history, and metrics instead.
+
+${generated.reply}`,
+    };
   }
 
   const enrollment = await prisma.programEnrollment.findFirst({
@@ -810,7 +861,8 @@ Never invent data. Always reference real numbers from context. "response" is alw
   const reply = `**${ctx.program.name}** — Week ${ctx.program.currentWeek}, Day ${ctx.program.currentDay}\n\n` +
                 `${exercisesList}\n\n` +
                 `Warm up 5–7 minutes • Rest 60–90 seconds between sets${fatNote}\n\n` +
-                `Tell me when you're done and I'll log it for you! `;
+                `${this.workoutFuelPlan(ctx, ctx.program.name + ' Week ' + ctx.program.currentWeek + ' Day ' + ctx.program.currentDay)}\n\n` +
+                `Tell me when you're done and I'll log it for you!`;
 
   return {
     success: true,
@@ -838,7 +890,21 @@ Never invent data. Always reference real numbers from context. "response" is alw
 
   private async weeklyProgram(userId: string, ctx: UserContext): Promise<CoachResponse> {
   if (!ctx.program) {
-    return { success: true, reply: `No active program. Browse Programs to enroll.` };
+    const base = this.getGoalWorkoutBlueprint(ctx);
+    return {
+      success: true,
+      reply: `No active program found, so here is a flexible week built from your goal, history, and level.
+
+Week Plan:
+• Day 1: ${base.title}
+• Day 2: Mobility + 25 min walk
+• Day 3: Repeat main lifts with 1 extra rep per set if RPE < 8
+• Day 4: Rest or light stretching
+• Day 5: Full-body conditioning
+
+${this.workoutFuelPlan(ctx, base.title)}`,
+      data: { source: 'history_goal_profile', workout: base },
+    };
   }
 
   const enrollment = await prisma.programEnrollment.findFirst({
@@ -1040,10 +1106,15 @@ Never invent data. Always reference real numbers from context. "response" is alw
     const isLoss = goal.includes('loss') || goal.includes('cut');
     const isGain = goal.includes('muscle') || goal.includes('gain') || goal.includes('bulk');
 
-    // Meal timing based on workout presence
-    const hasWorkoutToday = ctx.recentLogs.some(l =>
-      l.date === new Date().toLocaleDateString('en-KE', { weekday: 'short', month: 'short', day: 'numeric' }) && !l.skipped
-    );
+    // Meal timing based on workout presence. If no program/log exists for the day,
+    // infer the likely workout from goal/history so diet plans still work for users
+    // who are not enrolled in a program.
+    const todayLabel = new Date().toLocaleDateString('en-KE', { weekday: 'short', month: 'short', day: 'numeric' });
+    const loggedToday = ctx.recentLogs.some(l => l.date === todayLabel && !l.skipped);
+    const predictedWorkout = ctx.program?.nextExercises?.length
+      ? `${ctx.program.name} — ${ctx.program.nextExercises.join(', ')}`
+      : this.getGoalWorkoutBlueprint(ctx).title;
+    const hasWorkoutToday = loggedToday || Boolean(predictedWorkout);
 
     const meals = [
       {
@@ -1100,12 +1171,13 @@ Never invent data. Always reference real numbers from context. "response" is alw
 
     return {
       success: true,
-      reply: `**Personalised Nutrition Plan — ${ctx.fitnessGoal.toUpperCase()}**\n\n` +
-        `**Daily Targets:** ${cal} kcal | Protein: ${pro}g | Carbs: ${carb}g | Fat: ${fat}g\n` +
-        `**Hydration:** ${hydration} ml/day (${Math.round(hydration/250)} glasses)\n\n` +
+      reply: `Personalised Nutrition Plan — ${ctx.fitnessGoal.toUpperCase()}\n\n` +
+        `Workout basis: ${predictedWorkout}\n\n` +
+        `Daily Targets: ${cal} kcal | Protein: ${pro}g | Carbs: ${carb}g | Fat: ${fat}g\n` +
+        `Hydration: ${hydration} ml/day (${Math.round(hydration/250)} glasses)\n\n` +
         mealLines + '\n\n' +
-        `**Key Rules:**\n${tips}`,
-      data: { targets: { calories: cal, protein: pro, carbs: carb, fat }, meals },
+        `Key Rules:\n${tips}`,
+      data: { targets: { calories: cal, protein: pro, carbs: carb, fat }, meals, predictedWorkout },
     };
   }
 
