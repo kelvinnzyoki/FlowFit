@@ -1252,7 +1252,7 @@ Never invent data. Always reference real numbers from context. "response" is alw
       const reply = `${exercisesList}\n\n` +
                     `Warm up 5–7 minutes. Rest 60–90 seconds between sets.\n\n` +
                     `${this.workoutFuelPlan(ctx)}\n\n` +
-                    `Tell me when you're done and I'll log it for you.`;
+                    ``;
 
       return {
         success: true,
@@ -1283,7 +1283,7 @@ Never invent data. Always reference real numbers from context. "response" is alw
     const reply = `${exercisesList}\n\n` +
                   `Warm up 5–7 minutes. Rest 60–90 seconds between sets.${fatNote}\n\n` +
                   `${this.workoutFuelPlan(ctx)}\n\n` +
-                  `Tell me when you're done and I'll log it for you.`;
+                  ``;
 
     return {
       success: true,
