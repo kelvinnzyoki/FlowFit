@@ -1157,10 +1157,9 @@ Never invent data. Always reference real numbers from context. "response" is alw
         : '';
 
       const reply =
-        `${prog.name} — Week ${prog.currentWeek}, Day ${prog.currentDay}\n\n` +
         `Focus: ${blueprint.focus}\n\n` +
         `Workout:\n${allLines}${volNote}\n\n` +
-        `${this.workoutFuelPlan(ctx, `${prog.name} Day ${prog.currentDay}`)}\n\n` +
+        `${this.workoutFuelPlan(ctx)}\n\n` +
         `This combines your program session with goal-optimised context. Warm up 5–7 min. ` +
         `Rest 60–90 s. Tell me when you finish and I can log it.`;
 
@@ -1247,13 +1246,12 @@ Never invent data. Always reference real numbers from context. "response" is alw
     const dayEx = selectedDay?.exercises ?? [];
     if (!dayEx.length && programCtx.nextExercises.length) {
       const exercisesList = programCtx.nextExercises.map((name, i) =>
-        `${i + 1}. ${name} — 3 sets × 10–12 reps [Program template]`
+        `${i + 1}. ${name} — 3 sets × 10–12 reps`
       ).join('\n');
 
-      const reply = `${programCtx.name} — Week ${programCtx.currentWeek}, Day ${programCtx.currentDay}\n\n` +
-                    `${exercisesList}\n\n` +
+      const reply = `${exercisesList}\n\n` +
                     `Warm up 5–7 minutes. Rest 60–90 seconds between sets.\n\n` +
-                    `${this.workoutFuelPlan(ctx, programCtx.name + ' Week ' + programCtx.currentWeek + ' Day ' + programCtx.currentDay)}\n\n` +
+                    `${this.workoutFuelPlan(ctx)}\n\n` +
                     `Tell me when you're done and I'll log it for you.`;
 
       return {
@@ -1272,21 +1270,19 @@ Never invent data. Always reference real numbers from context. "response" is alw
 
     const exercisesList = dayEx.map((de: any, i: number) => {
       const exName = de.exercise?.name ?? de.exerciseName ?? 'Exercise';
-      const exCat = de.exercise?.category ?? 'General';
       const sets = de.sets ? `${de.sets} sets` : '3 sets';
       const reps = de.reps ? ` × ${de.reps}` : '';
       const rest = de.restSeconds ? ` • ${de.restSeconds}s rest` : '';
-      return `${i + 1}. ${exName} — ${sets}${reps}${rest} [${exCat}]`;
+      return `${i + 1}. ${exName} — ${sets}${reps}${rest}`;
     }).join('\n');
 
     const fatNote = (ctx.fatigueScore ?? 0) >= 6
       ? `\n\nFatigue is elevated — reduce load 10–15% and focus on form today.`
       : '';
 
-    const reply = `${programCtx.name} — Week ${shownWeek}, Day ${shownDay}\n\n` +
-                  `${exercisesList}\n\n` +
+    const reply = `${exercisesList}\n\n` +
                   `Warm up 5–7 minutes. Rest 60–90 seconds between sets.${fatNote}\n\n` +
-                  `${this.workoutFuelPlan(ctx, programCtx.name + ' Week ' + shownWeek + ' Day ' + shownDay)}\n\n` +
+                  `${this.workoutFuelPlan(ctx)}\n\n` +
                   `Tell me when you're done and I'll log it for you.`;
 
     return {
@@ -1305,10 +1301,9 @@ Never invent data. Always reference real numbers from context. "response" is alw
     const streak = ctx.currentStreak > 0 ? `\n\n${ctx.currentStreak}-day streak — don't break it!` : '';
     return {
       success: true,
-      reply: `**${p.name}**\n\nWeek ${p.currentWeek}/${p.durationWeeks}, Day ${p.currentDay}\n` +
-        `${p.completedDays} done | ${daysLeft} remaining | ${p.pctComplete}% complete\n` +
+      reply: `${p.completedDays} sessions done | ${daysLeft} remaining | ${p.pctComplete}% complete\n` +
         `${weeksLeft} week${weeksLeft !== 1 ? 's' : ''} left` +
-        (p.nextExercises.length ? `\n\nToday: ${p.nextExercises.join(', ')}` : '') + streak,
+        (p.nextExercises.length ? `\n\nNext session: ${p.nextExercises.join(', ')}` : '') + streak,
       data: { program: p },
     };
   }
@@ -1376,7 +1371,7 @@ Never invent data. Always reference real numbers from context. "response" is alw
 
     return {
       success: true,
-      reply: `${programCtx.name} — Week ${selectedWeek?.weekNumber ?? programCtx.currentWeek}\n\n${scheduleLines}\n\n${programCtx.completedDays}/${programCtx.totalDays} sessions complete · ${programCtx.pctComplete}% done`,
+      reply: `Weekly plan:\n\n${scheduleLines}\n\n${programCtx.completedDays}/${programCtx.totalDays} sessions complete · ${programCtx.pctComplete}% done`,
       data: { days },
     };
   }
