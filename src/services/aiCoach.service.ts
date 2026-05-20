@@ -1252,7 +1252,6 @@ Never invent data. Always reference real numbers from context. "response" is alw
 
       const reply = `${programCtx.name} — Week ${programCtx.currentWeek}, Day ${programCtx.currentDay}\n\n` +
                     `${exercisesList}\n\n` +
-                    `This uses your enrolled program template because this program has no saved day-exercise rows yet. ` +
                     `Warm up 5–7 minutes. Rest 60–90 seconds between sets.\n\n` +
                     `${this.workoutFuelPlan(ctx, programCtx.name + ' Week ' + programCtx.currentWeek + ' Day ' + programCtx.currentDay)}\n\n` +
                     `Tell me when you're done and I'll log it for you.`;
