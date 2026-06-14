@@ -36,7 +36,7 @@ app.set('trust proxy', 1);
 // - /api/webhooks/paystack       old dashboard URL used by many deployments
 // - /api/v1/paystack/webhook     canonical v1 API URL used by corrected files
 // Configure Paystack dashboard to one of these exact URLs.
-const paystackRawJson = express.raw({ type: 'application/json', limit: '2mb' });
+const paystackRawJson = express.raw({ type: 'application/json' });
 app.use('/api/webhooks/paystack', paystackRawJson, paystackWebhookRoutes);
 app.use('/api/v1/webhooks/paystack', paystackRawJson, paystackWebhookRoutes);
 
