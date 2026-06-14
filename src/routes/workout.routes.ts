@@ -6,29 +6,48 @@ const router = Router();
 
 router.use(authenticate);
 
+function toPositiveInt(value: unknown, fallback: number) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function dayExerciseToExerciseLike(dayExercise: any) {
+  const linked = dayExercise.exercise;
+  return {
+    id: dayExercise.exerciseId || dayExercise.id,
+    name: linked?.name || dayExercise.exerciseName || 'Program Exercise',
+    description: linked?.description || dayExercise.notes || 'Program exercise from your FlowFit training plan.',
+    category: linked?.category || 'Program',
+    caloriesPerMin: linked?.caloriesPerMin ?? 0,
+    isActive: true,
+    createdAt: dayExercise.createdAt || new Date(),
+    dayExerciseId: dayExercise.id,
+    sets: dayExercise.sets,
+    reps: dayExercise.reps,
+    restSeconds: dayExercise.restSeconds,
+    notes: dayExercise.notes,
+  };
+}
+
 // ─── GET /api/v1/workouts ────────────────────────────────────────────────────
-// Called by: WorkoutsAPI.getExercises(filters)
-// Schema model: Exercise (not Workout — your schema uses Exercise for the library)
-// Supports schema-safe filters: ?category=&q=&limit=&page=
+// Frontend receives Exercise rows and normalizes them into Workout cards.
+// Supports: ?category=&q=&limit=&page=
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const {
-      category,
-      q,
-      limit = '20',
-      page  = '1',
-    } = req.query as Record<string, string>;
-
-    const take = Math.min(parseInt(limit), 100);
-    const skip = (parseInt(page) - 1) * take;
+    const { category, q } = req.query as Record<string, string>;
+    const take = Math.min(toPositiveInt(req.query.limit, 20), 100);
+    const page = toPositiveInt(req.query.page, 1);
+    const skip = (page - 1) * take;
 
     const where: Record<string, unknown> = { isActive: true };
-    if (category) where.category = category;
-    if (q) {
+
+    if (category && category !== 'All') where.category = category;
+
+    if (q && q.trim()) {
       where.OR = [
-        { name:        { contains: q, mode: 'insensitive' } },
-        { description: { contains: q, mode: 'insensitive' } },
-        { category:    { contains: q, mode: 'insensitive' } },
+        { name:        { contains: q.trim(), mode: 'insensitive' } },
+        { description: { contains: q.trim(), mode: 'insensitive' } },
+        { category:    { contains: q.trim(), mode: 'insensitive' } },
       ];
     }
 
@@ -39,10 +58,10 @@ router.get('/', async (req: Request, res: Response) => {
 
     res.status(200).json({
       success: true,
-      data:    exercises,
+      data: exercises,
       meta: {
         total,
-        page:  parseInt(page),
+        page,
         limit: take,
         pages: Math.ceil(total / take),
       },
@@ -54,8 +73,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // ─── GET /api/v1/workouts/search ─────────────────────────────────────────────
-// Called by: WorkoutsAPI.searchExercises(query)
-// Must be defined BEFORE /:id so "search" is not treated as an id
+// Must stay before /:id so "search" is not treated as an id.
 router.get('/search', async (req: Request, res: Response) => {
   try {
     const { q } = req.query as { q?: string };
@@ -65,15 +83,17 @@ router.get('/search', async (req: Request, res: Response) => {
       return;
     }
 
+    const needle = q.trim();
     const exercises = await prisma.exercise.findMany({
       where: {
         isActive: true,
         OR: [
-          { name:        { contains: q, mode: 'insensitive' } },
-          { description: { contains: q, mode: 'insensitive' } },
-          { category:    { contains: q, mode: 'insensitive' } },
+          { name:        { contains: needle, mode: 'insensitive' } },
+          { description: { contains: needle, mode: 'insensitive' } },
+          { category:    { contains: needle, mode: 'insensitive' } },
         ],
       },
+      orderBy: { name: 'asc' },
       take: 20,
     });
 
@@ -85,19 +105,56 @@ router.get('/search', async (req: Request, res: Response) => {
 });
 
 // ─── GET /api/v1/workouts/:id ─────────────────────────────────────────────────
-// Called by: WorkoutsAPI.getExerciseById(id)
+// Supports both real Exercise.id and DayExercise.id from program detail pages.
+// If a DayExercise is not linked to a library Exercise, the response is shaped
+// like an Exercise so the React workout-session page can still render and log it.
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const exercise = await prisma.exercise.findUnique({
-      where: { id: req.params.id },
-    });
+    const id = String(req.params.id || '').trim();
 
-    if (!exercise || !exercise.isActive) {
-      res.status(404).json({ success: false, error: 'Exercise not found.' });
+    const exercise = await prisma.exercise.findUnique({ where: { id } });
+    if (exercise?.isActive) {
+      res.status(200).json({ success: true, data: exercise });
       return;
     }
 
-    res.status(200).json({ success: true, data: exercise });
+    const dayExercise = await prisma.dayExercise.findUnique({
+      where: { id },
+      include: {
+        exercise: true,
+        day: {
+          include: {
+            week: {
+              include: {
+                program: {
+                  select: { id: true, userId: true, isPublic: true, isActive: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (dayExercise) {
+      const authUserId = (req as any).user?.id || (req as any).userId;
+      const program = dayExercise.day?.week?.program;
+
+      if (!program?.isActive) {
+        res.status(404).json({ success: false, error: 'Exercise not found.' });
+        return;
+      }
+
+      if (!program.isPublic && program.userId !== authUserId) {
+        res.status(403).json({ success: false, error: 'You cannot access this program exercise.' });
+        return;
+      }
+
+      res.status(200).json({ success: true, data: dayExerciseToExerciseLike(dayExercise) });
+      return;
+    }
+
+    res.status(404).json({ success: false, error: 'Exercise not found.' });
   } catch (error) {
     console.error('Get exercise by id error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch exercise.' });

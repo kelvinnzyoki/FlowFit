@@ -90,6 +90,7 @@ router.get('/', async (req: Request, res: Response) => {
       category,
       isPublic,   // replaces the old (wrong) isPremium — Program has isPublic, not isPremium
       type,
+      q,
       mine,
       limit = '20',
       page  = '1',
@@ -103,6 +104,14 @@ router.get('/', async (req: Request, res: Response) => {
     if (category)   where.category   = category;
     if (type)       where.type       = type;
     if (isPublic !== undefined) where.isPublic = isPublic === 'true';
+    if (q && q.trim()) {
+      where.OR = [
+        { name:        { contains: q.trim(), mode: 'insensitive' } },
+        { description: { contains: q.trim(), mode: 'insensitive' } },
+        { category:    { contains: q.trim(), mode: 'insensitive' } },
+        { difficulty:  { contains: q.trim(), mode: 'insensitive' } },
+      ];
+    }
 
     // mine=true — only show programs created by the current user
     const authUserId = getAuthUserId(req);
@@ -125,12 +134,18 @@ router.get('/', async (req: Request, res: Response) => {
       prisma.program.count({ where }),
     ]);
 
-    const data = programs.map((p: any) => ({
-      ...p,
-      title: p.title || p.name,
-      level: p.level || p.difficulty,
-      icon: p.icon || (p.metadata && typeof p.metadata === 'object' && !Array.isArray(p.metadata) ? (p.metadata as any).icon : undefined) || '',
-    }));
+    const data = programs.map((p: any) => {
+      const metadata = p.metadata && typeof p.metadata === 'object' && !Array.isArray(p.metadata) ? p.metadata as any : {};
+      return {
+        ...p,
+        title: p.name,
+        level: p.difficulty,
+        focus: p.category,
+        duration: `${p.durationWeeks} week${p.durationWeeks === 1 ? '' : 's'} · ${p.daysPerWeek} day${p.daysPerWeek === 1 ? '' : 's'}/week`,
+        image: metadata.image || 'fit1.webp',
+        icon: metadata.icon || '',
+      };
+    });
 
     res.status(200).json({
       success: true,
@@ -225,6 +240,8 @@ router.post('/', async (req: Request, res: Response) => {
       type        = 'custom',
       exercises   = [],
       metadata    = {},
+      durationWeeks,
+      daysPerWeek,
     } = req.body;
 
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -266,8 +283,8 @@ router.post('/', async (req: Request, res: Response) => {
               category,
               difficulty,
               metadata:     metadata as any,
-              durationWeeks: 1,
-              daysPerWeek:   1,
+              durationWeeks: Number(durationWeeks ?? (metadata as any)?.durationWeeks ?? 1) || 1,
+              daysPerWeek:   Number(daysPerWeek ?? (metadata as any)?.daysPerWeek ?? 1) || 1,
               weeks: exercises.length > 0 ? {
                 create: [{
                   weekNumber:  1,
@@ -355,8 +372,8 @@ router.post('/', async (req: Request, res: Response) => {
         difficulty,
         type,
         metadata:      metadata as any,
-        durationWeeks: 1,
-        daysPerWeek:   1,
+        durationWeeks: Number(durationWeeks ?? (metadata as any)?.durationWeeks ?? 1) || 1,
+        daysPerWeek:   Number(daysPerWeek ?? (metadata as any)?.daysPerWeek ?? 1) || 1,
         isActive:      true,
         isPublic:      false,
         ...(weeksCreate ? { weeks: weeksCreate } : {}),
@@ -523,10 +540,12 @@ router.get('/:id', async (req: Request, res: Response) => {
                   include: {
                     exercise: {
                       select: {
-                        id:          true,
-                        name:        true,
-                        description: true,
-                        category:    true,
+                        id:             true,
+                        name:           true,
+                        description:    true,
+                        category:       true,
+                        caloriesPerMin: true,
+                        isActive:       true,
                       },
                     },
                   },
@@ -538,12 +557,29 @@ router.get('/:id', async (req: Request, res: Response) => {
       },
     });
 
-    if (!program) {
+    if (!program || !program.isActive) {
       res.status(404).json({ success: false, error: 'Program not found.' });
       return;
     }
 
-    res.status(200).json({ success: true, data: program });
+    const authUserId = getAuthUserId(req);
+    if (!program.isPublic && program.userId !== authUserId) {
+      res.status(403).json({ success: false, error: 'You cannot access this program.' });
+      return;
+    }
+
+    const metadata = program.metadata && typeof program.metadata === 'object' && !Array.isArray(program.metadata) ? program.metadata as any : {};
+    res.status(200).json({
+      success: true,
+      data: {
+        ...program,
+        title: program.name,
+        level: program.difficulty,
+        focus: program.category,
+        duration: `${program.durationWeeks} week${program.durationWeeks === 1 ? '' : 's'} · ${program.daysPerWeek} day${program.daysPerWeek === 1 ? '' : 's'}/week`,
+        image: metadata.image || 'fit1.webp',
+      },
+    });
   } catch (error) {
     console.error('Get program by id error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch program.' });
