@@ -1,754 +1,307 @@
-import { Router, Request, Response } from 'express';
-import prisma from '../config/db.js';
-import { authenticate } from '../middleware/auth.middleware.js';
+import { Router, type Request, type Response } from 'express';
+import { PrismaClient } from '@prisma/client';
+import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
+const prisma = new PrismaClient();
 
-router.use(authenticate);
+type AuthedRequest = Request & {
+  user?: {
+    id?: string;
+    userId?: string;
+    email?: string;
+    role?: string;
+  };
+};
 
-function getAuthUserId(req: Request): string | null {
-  const r = req as any;
-  return r.user?.id || r.userId || r.auth?.userId || r.authUser?.id || null;
+function getUserId(req: AuthedRequest): string | undefined {
+  return req.user?.id || req.user?.userId;
 }
 
+function normalizeProgram(program: any, enrollment?: any) {
+  const weeks = Array.isArray(program?.weeks)
+    ? program.weeks.map((week: any) => ({
+        id: week.id,
+        weekNumber: week.weekNumber,
+        title: week.name || `Week ${week.weekNumber}`,
+        name: week.name || `Week ${week.weekNumber}`,
+        description: week.description || '',
+        days: Array.isArray(week.days)
+          ? week.days.map((day: any) => ({
+              id: day.id,
+              dayNumber: day.dayNumber,
+              title: day.name || `Day ${day.dayNumber}`,
+              name: day.name || `Day ${day.dayNumber}`,
+              isRestDay: day.isRestDay,
+              exercises: Array.isArray(day.exercises)
+                ? day.exercises.map((de: any) => {
+                    const ex = de.exercise || null;
+                    return {
+                      id: ex?.id || de.exerciseId || de.id,
+                      dayExerciseId: de.id,
+                      exerciseId: de.exerciseId,
+                      name: ex?.name || de.exerciseName || 'Exercise',
+                      exerciseName: de.exerciseName || ex?.name || 'Exercise',
+                      category: ex?.category || 'STRENGTH',
+                      description: ex?.description || de.notes || '',
+                      caloriesPerMin: Number(ex?.caloriesPerMin ?? 0),
+                      orderIndex: de.orderIndex ?? 0,
+                      sets: de.sets,
+                      reps: de.reps,
+                      restSeconds: de.restSeconds,
+                      notes: de.notes,
+                      exercise: ex,
+                    };
+                  })
+                : [],
+            }))
+          : [],
+      }))
+    : [];
 
-function monthStartUtc(d = new Date()): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
+  return {
+    id: program.id,
+    userId: program.userId,
+    title: program.name,
+    name: program.name,
+    description: program.description || '',
+    category: program.category,
+    focus: program.category,
+    level: program.difficulty,
+    difficulty: program.difficulty,
+    type: program.type,
+    metadata: program.metadata,
+    isActive: program.isActive,
+    isPublic: program.isPublic,
+    durationWeeks: program.durationWeeks,
+    daysPerWeek: program.daysPerWeek,
+    weeks,
+    enrollment: enrollment || program.enrollments?.[0] || null,
+    createdAt: program.createdAt,
+    updatedAt: program.updatedAt,
+  };
 }
 
-const QUOTA_ACTIVE_STATUSES = ['ACTIVE', 'TRIALING', 'GRACE_PERIOD'] as const;
-
-async function getProgramQuotaState(userId: string) {
-  const monthStart = monthStartUtc();
-
-  const subscription = await prisma.subscription.findFirst({
-    where: {
-      userId,
-      status: { in: QUOTA_ACTIVE_STATUSES as any },
+const programInclude = {
+  weeks: {
+    orderBy: { weekNumber: 'asc' as const },
+    include: {
+      days: {
+        orderBy: { dayNumber: 'asc' as const },
+        include: {
+          exercises: {
+            orderBy: { orderIndex: 'asc' as const },
+            include: {
+              exercise: true,
+            },
+          },
+        },
+      },
     },
-    orderBy: { createdAt: 'desc' },
-    include: { plan: true },
-  });
+  },
+  enrollments: true,
+};
 
-  const planSlug = subscription?.plan?.slug || 'free';
-  if (planSlug !== 'free') {
-    return { enforce: false, planSlug, max: Number.POSITIVE_INFINITY, used: 0, remaining: Number.POSITIVE_INFINITY, monthStart };
-  }
-
-  const freePlan = subscription?.plan || await prisma.plan.findUnique({ where: { slug: 'free' } });
-  const max = freePlan?.maxPrograms ?? 2;
-
-  // Monthly usage = first-time enrollments started this month + restart attempts this month.
-  // Completed/inactive rows remain counted; this prevents users from finishing/cancelling
-  // and immediately regaining Free slots before the month rolls over.
-  const [initialEnrollmentsThisMonth, restartsThisMonth] = await Promise.all([
-    prisma.programEnrollment.count({
-      where: {
-        userId,
-        createdAt: { gte: monthStart },
-      },
-    }),
-    prisma.programEnrollmentUsage.count({
-      where: {
-        userId,
-        createdAt: { gte: monthStart },
-      },
-    }),
-  ]);
-
-  const used = initialEnrollmentsThisMonth + restartsThisMonth;
-  return { enforce: true, planSlug, max, used, remaining: Math.max(0, max - used), monthStart };
-}
-
-function quotaExceededResponse(res: Response, quota: Awaited<ReturnType<typeof getProgramQuotaState>>) {
-  res.status(403).json({
-    success: false,
-    error: `Free plan allows ${quota.max} program enrollment${quota.max === 1 ? '' : 's'} per month. Upgrade to Pro or Elite to enroll in more programs.`,
-    code: 'PROGRAM_LIMIT_REACHED',
-    limit: quota.max,
-    used: quota.used,
-    remaining: quota.remaining,
-    resetAt: new Date(Date.UTC(quota.monthStart.getUTCFullYear(), quota.monthStart.getUTCMonth() + 1, 1, 0, 0, 0, 0)).toISOString(),
-    upgradeUrl: '/subscription',
-  });
-}
-
-function requireUserId(req: Request, res: Response): string | null {
-  const userId = getAuthUserId(req);
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'Authentication required.' });
-    return null;
-  }
-  return userId;
-}
-
-// ─── GET /api/v1/programs ─────────────────────────────────────────────────────
-router.get('/', async (req: Request, res: Response) => {
+// GET /api/v1/programs
+// Protected: returns only programs the current user can open.
+router.get('/', authenticate, async (req: AuthedRequest, res: Response) => {
   try {
-    const {
-      difficulty,
-      category,
-      isPublic,   // replaces the old (wrong) isPremium — Program has isPublic, not isPremium
-      type,
-      q,
-      mine,
-      limit = '20',
-      page  = '1',
-    } = req.query as Record<string, string>;
-
-    const take = Math.min(parseInt(limit), 100);
-    const skip = (parseInt(page) - 1) * take;
-
-    const where: Record<string, unknown> = { isActive: true };
-    if (difficulty) where.difficulty = difficulty;
-    if (category)   where.category   = category;
-    if (type)       where.type       = type;
-    if (isPublic !== undefined) where.isPublic = isPublic === 'true';
-    if (q && q.trim()) {
-      where.OR = [
-        { name:        { contains: q.trim(), mode: 'insensitive' } },
-        { description: { contains: q.trim(), mode: 'insensitive' } },
-        { category:    { contains: q.trim(), mode: 'insensitive' } },
-        { difficulty:  { contains: q.trim(), mode: 'insensitive' } },
-      ];
+    const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
     }
 
-    // mine=true — only show programs created by the current user
-    const authUserId = getAuthUserId(req);
-    if (mine === 'true') {
-      if (!authUserId) {
-        res.status(401).json({ success: false, error: 'Authentication required.' });
-        return;
-      }
-      where.userId = authUserId;
-    }
-
-    const [programs, total] = await Promise.all([
-      prisma.program.findMany({
-        where,
-        take,
-        skip,
-        orderBy: { createdAt: 'desc' },
-        include: { _count: { select: { weeks: true, enrollments: true } } },
-      }),
-      prisma.program.count({ where }),
-    ]);
-
-    const data = programs.map((p: any) => {
-      const metadata = p.metadata && typeof p.metadata === 'object' && !Array.isArray(p.metadata) ? p.metadata as any : {};
-      return {
-        ...p,
-        title: p.name,
-        level: p.difficulty,
-        focus: p.category,
-        duration: `${p.durationWeeks} week${p.durationWeeks === 1 ? '' : 's'} · ${p.daysPerWeek} day${p.daysPerWeek === 1 ? '' : 's'}/week`,
-        image: metadata.image || 'fit1.webp',
-        icon: metadata.icon || '',
-      };
-    });
-
-    res.status(200).json({
-      success: true,
-      data,
-      meta: {
-        total,
-        page:  parseInt(page),
-        limit: take,
-        pages: Math.ceil(total / take),
+    const programs = await prisma.program.findMany({
+      where: {
+        isActive: true,
+        OR: [
+          { isPublic: true },
+          { userId },
+          { enrollments: { some: { userId } } },
+        ],
+      },
+      orderBy: [{ isPublic: 'desc' }, { createdAt: 'desc' }],
+      include: {
+        enrollments: {
+          where: { userId },
+          take: 1,
+        },
+        weeks: {
+          select: {
+            id: true,
+            weekNumber: true,
+            days: {
+              select: { id: true },
+            },
+          },
+        },
       },
     });
+
+    const data = programs.map((p: any) => normalizeProgram(p, p.enrollments?.[0] || null));
+
+    return res.json({ success: true, data, programs: data });
   } catch (error) {
-    console.error('Get programs error:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch programs.' });
+    console.error('[programs:list]', error);
+    return res.status(500).json({ success: false, error: 'Failed to load programs' });
   }
 });
 
-// ─── GET /api/v1/programs/my-enrollments ─────────────────────────────────────
-// Called by: ProgramsAPI.getUserPrograms()
-// Must be defined BEFORE /:id so Express doesn't treat "my-enrollments" as an id.
-router.get('/my-enrollments', async (req: Request, res: Response) => {
+// GET /api/v1/programs/enrollments/me
+router.get('/enrollments/me', authenticate, async (req: AuthedRequest, res: Response) => {
   try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
     const enrollments = await prisma.programEnrollment.findMany({
-      where:   { userId },
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
       include: {
         program: {
-          include: { _count: { select: { weeks: true } } },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    res.status(200).json({ success: true, data: enrollments });
-  } catch (error) {
-    console.error('Get enrollments error:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch your programs.' });
-  }
-});
-
-// ─── GET /api/v1/programs/ai-generated ───────────────────────────────────────
-// Returns the current user's single AI-generated program with full exercise data.
-// Profile page calls this to display the saved plan without relying on localStorage.
-router.get('/ai-generated', async (req: Request, res: Response) => {
-  try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-    const program = await prisma.program.findFirst({
-      where:   { userId, type: 'ai_generated' },
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        weeks: {
-          include: {
-            days: {
-              include: {
-                exercises: {
-                  orderBy: { orderIndex: 'asc' },
-                },
-              },
-            },
-          },
+          include: programInclude,
         },
       },
     });
 
-    if (!program) {
-      res.status(404).json({ success: false, error: 'No AI program found.' });
-      return;
-    }
-
-    res.status(200).json({ success: true, data: program });
+    return res.json({ success: true, data: enrollments, enrollments });
   } catch (error) {
-    console.error('Get AI program error:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch AI program.' });
+    console.error('[programs:enrollments]', error);
+    return res.status(500).json({ success: false, error: 'Failed to load enrollments' });
   }
 });
 
-// ─── POST /api/v1/programs ────────────────────────────────────────────────────
-// For type='ai_generated': upserts — replaces the user's existing AI program
-// so they always have exactly one. New exercises replace old ones entirely.
-// For other types: always creates a new program.
-router.post('/', async (req: Request, res: Response) => {
+// GET /api/v1/programs/:id
+// Protected detail. Must return full weeks -> days -> exercises.
+router.get('/:id', authenticate, async (req: AuthedRequest, res: Response) => {
   try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-    const {
-      name,
-      description,
-      category    = 'general_fitness',
-      difficulty  = 'intermediate',
-      type        = 'custom',
-      exercises   = [],
-      metadata    = {},
-      durationWeeks,
-      daysPerWeek,
-    } = req.body;
+    const userId = getUserId(req);
+    const { id } = req.params;
 
-    if (!name || typeof name !== 'string' || !name.trim()) {
-      res.status(400).json({ success: false, error: 'Program name is required.' });
-      return;
-    }
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
-    // For AI programs — find and replace existing one so the user has exactly one.
-    if (type === 'ai_generated') {
-      const existing = await prisma.program.findFirst({
-        where:  { userId, type: 'ai_generated' },
-        select: { id: true },
-      });
-
-      if (existing) {
-        // Delete the old nested structure then update in a single transaction
-        await prisma.$transaction(async (tx) => {
-          const weeks = await tx.week.findMany({
-            where:  { programId: existing.id },
-            select: { id: true },
-          });
-          for (const week of weeks) {
-            const days = await tx.day.findMany({
-              where:  { weekId: week.id },
-              select: { id: true },
-            });
-            for (const day of days) {
-              await tx.dayExercise.deleteMany({ where: { dayId: day.id } });
-            }
-            await tx.day.deleteMany({ where: { weekId: week.id } });
-          }
-          await tx.week.deleteMany({ where: { programId: existing.id } });
-
-          await tx.program.update({
-            where: { id: existing.id },
-            data: {
-              name:         name.trim(),
-              description:  description || '',
-              category,
-              difficulty,
-              metadata:     metadata as any,
-              durationWeeks: Number(durationWeeks ?? (metadata as any)?.durationWeeks ?? 1) || 1,
-              daysPerWeek:   Number(daysPerWeek ?? (metadata as any)?.daysPerWeek ?? 1) || 1,
-              weeks: exercises.length > 0 ? {
-                create: [{
-                  weekNumber:  1,
-                  name:       'Week 1',
-                  description: 'AI-generated workout',
-                  days: {
-                    create: [{
-                      dayNumber: 1,
-                      name:     name.trim(),
-                      isRestDay: false,
-                      exercises: {
-                        create: exercises.map((ex: any, idx: number) => ({
-                          orderIndex:   ex.order  ?? idx,
-                          exerciseName: ex.name   || `Exercise ${idx + 1}`,
-                          sets:         Number(ex.sets)        || 3,
-                          reps:         String(ex.reps)        || '10',
-                          restSeconds:  Number(ex.restSeconds) || 60,
-                          notes:        ex.notes  || ex.formTip || '',
-                          ...(ex.exerciseId ? { exerciseId: ex.exerciseId } : {}),
-                        })),
-                      },
-                    }],
-                  },
-                }],
-              } : undefined,
-            },
-          });
-        });
-
-        const updated = await prisma.program.findUnique({
-          where:   { id: existing.id },
-          include: {
-            weeks: {
-              include: {
-                days: {
-                  include: {
-                    exercises: { orderBy: { orderIndex: 'asc' } },
-                  },
-                },
-              },
-            },
-            _count: { select: { weeks: true, enrollments: true } },
-          },
-        });
-        res.status(200).json({ success: true, data: updated });
-        return;
-      }
-    }
-
-    // No existing AI program (or non-AI type) — create fresh
-    const weeksCreate = type === 'ai_generated' && exercises.length > 0
-      ? {
-          create: [{
-            weekNumber:  1,
-            name:       'Week 1',
-            description: 'AI-generated workout',
-            days: {
-              create: [{
-                dayNumber:  1,
-                name:      name.trim(),
-                isRestDay:  false,
-                exercises: {
-                  create: exercises.map((ex: any, idx: number) => ({
-                    orderIndex:   ex.order ?? idx,
-                    exerciseName: ex.name  || `Exercise ${idx + 1}`,
-                    sets:         Number(ex.sets)        || 3,
-                    reps:         String(ex.reps)        || '10',
-                    restSeconds:  Number(ex.restSeconds) || 60,
-                    notes:        ex.notes || ex.formTip || '',
-                    ...(ex.exerciseId ? { exerciseId: ex.exerciseId } : {}),
-                  })),
-                },
-              }],
-            },
-          }],
-        }
-      : undefined;
-
-    const program = await prisma.program.create({
-      data: {
-        userId,
-        name:          name.trim(),
-        description:   description || '',
-        category,
-        difficulty,
-        type,
-        metadata:      metadata as any,
-        durationWeeks: Number(durationWeeks ?? (metadata as any)?.durationWeeks ?? 1) || 1,
-        daysPerWeek:   Number(daysPerWeek ?? (metadata as any)?.daysPerWeek ?? 1) || 1,
-        isActive:      true,
-        isPublic:      false,
-        ...(weeksCreate ? { weeks: weeksCreate } : {}),
-      },
-      include: {
-        weeks: {
-          include: {
-            days: {
-              include: {
-                exercises: { orderBy: { orderIndex: 'asc' } },
-              },
-            },
-          },
-        },
-        _count: { select: { weeks: true, enrollments: true } },
-      },
-    });
-    res.status(201).json({ success: true, data: program });
-  } catch (error) {
-    console.error('Create program error:', error);
-    res.status(500).json({ success: false, error: 'Failed to create program.' });
-  }
-});
-
-// ─── PATCH /api/v1/programs/:id ───────────────────────────────────────────────
-// Called by: ProgramsAPI.saveAiProgram() when an existing AI program is found.
-// Replaces the program's content in-place — the user only ever has one AI program.
-//
-// Security: only the owner can update their own program.
-router.patch('/:id', async (req: Request, res: Response) => {
-  try {
-    const userId    = requireUserId(req, res);
-    if (!userId) return;
-    const programId = req.params.id;
-
-    const {
-      name,
-      description,
-      category,
-      difficulty,
-      type,
-      exercises = [],
-      metadata  = {},
-    } = req.body;
-
-    // Ownership check — never let one user overwrite another's program
-    const existing = await prisma.program.findUnique({
-      where:  { id: programId },
-      select: { userId: true, type: true },
-    });
-
-    if (!existing) {
-      res.status(404).json({ success: false, error: 'Program not found.' });
-      return;
-    }
-    if (existing.userId !== userId) {
-      res.status(403).json({ success: false, error: 'You do not own this program.' });
-      return;
-    }
-
-    // For AI programs: delete old weeks/days/exercises then recreate them
-    // so we always reflect the latest generated plan exactly.
-    if ((type ?? existing.type) === 'ai_generated' && exercises.length > 0) {
-      await prisma.$transaction(async (tx) => {
-        // Delete existing nested structure
-        const weeks = await tx.week.findMany({
-          where:   { programId },
-          select:  { id: true },
-        });
-        for (const week of weeks) {
-          const days = await tx.day.findMany({
-            where:  { weekId: week.id },
-            select: { id: true },
-          });
-          for (const day of days) {
-            await tx.dayExercise.deleteMany({ where: { dayId: day.id } });
-          }
-          await tx.day.deleteMany({ where: { weekId: week.id } });
-        }
-        await tx.week.deleteMany({ where: { programId } });
-
-        // Recreate with the new exercises — always reset to 1 week / 1 day for AI plans
-        await tx.program.update({
-          where: { id: programId },
-          data: {
-            ...(name        && { name: name.trim() }),
-            ...(description !== undefined && { description }),
-            ...(category    && { category }),
-            ...(difficulty  && { difficulty }),
-            metadata:     metadata as any,
-            durationWeeks: 1,
-            daysPerWeek:   1,
-            updatedAt:    new Date(),
-            weeks: {
-              create: [{
-                weekNumber:  1,
-                name:       'Week 1',
-                description: 'AI-generated workout',
-                days: {
-                  create: [{
-                    dayNumber: 1,
-                    name:     name?.trim() ?? 'AI Generated Workout',
-                    isRestDay: false,
-                    exercises: {
-                      create: exercises.map((ex: any, idx: number) => ({
-                        orderIndex:   ex.order ?? idx,
-                        exerciseName: ex.name  || `Exercise ${idx + 1}`,
-                        sets:         Number(ex.sets)        || 3,
-                        reps:         String(ex.reps)        || '10',
-                        restSeconds:  Number(ex.restSeconds) || 60,
-                        notes:        ex.notes || ex.formTip || '',
-                        ...(ex.exerciseId ? { exerciseId: ex.exerciseId } : {}),
-                      })),
-                    },
-                  }],
-                },
-              }],
-            },
-          },
-        });
-      });
-    } else {
-      // Non-AI program or no exercises supplied — update top-level fields only
-      await prisma.program.update({
-        where: { id: programId },
-        data: {
-          ...(name        && { name: name.trim() }),
-          ...(description !== undefined && { description }),
-          ...(category    && { category }),
-          ...(difficulty  && { difficulty }),
-          ...(type        && { type }),
-          metadata: metadata as any,
-          updatedAt: new Date(),
-        },
-      });
-    }
-
-    const updated = await prisma.program.findUnique({
-      where:   { id: programId },
-      include: { _count: { select: { weeks: true, enrollments: true } } },
-    });
-
-    res.status(200).json({ success: true, data: updated });
-  } catch (error) {
-    console.error('Update program error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update program.' });
-  }
-});
-
-// ─── GET /api/v1/programs/:id ─────────────────────────────────────────────────
-router.get('/:id', async (req: Request, res: Response) => {
-  try {
     const program = await prisma.program.findUnique({
-      where:   { id: req.params.id },
+      where: { id },
       include: {
-        weeks: {
-          orderBy: { weekNumber: 'asc' },
-          include: {
-            days: {
-              orderBy: { dayNumber: 'asc' },
-              include: {
-                exercises: {
-                  orderBy: { orderIndex: 'asc' },
-                  include: {
-                    exercise: {
-                      select: {
-                        id:             true,
-                        name:           true,
-                        description:    true,
-                        category:       true,
-                        caloriesPerMin: true,
-                        isActive:       true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
+        ...programInclude,
+        enrollments: {
+          where: { userId },
+          take: 1,
         },
       },
     });
 
     if (!program || !program.isActive) {
-      res.status(404).json({ success: false, error: 'Program not found.' });
-      return;
+      return res.status(404).json({ success: false, error: 'Program not found' });
     }
 
-    const authUserId = getAuthUserId(req);
-    if (!program.isPublic && program.userId !== authUserId) {
-      res.status(403).json({ success: false, error: 'You cannot access this program.' });
-      return;
+    const userEnrollment = program.enrollments?.[0] || null;
+    const canAccess = program.isPublic || program.userId === userId || Boolean(userEnrollment);
+
+    if (!canAccess) {
+      // Return 404 instead of 403 so inaccessible private IDs do not leak.
+      return res.status(404).json({ success: false, error: 'Program not found' });
     }
 
-    const metadata = program.metadata && typeof program.metadata === 'object' && !Array.isArray(program.metadata) ? program.metadata as any : {};
-    res.status(200).json({
-      success: true,
+    const data = normalizeProgram(program, userEnrollment);
+
+    return res.json({ success: true, data, program: data });
+  } catch (error) {
+    console.error('[programs:detail]', error);
+    return res.status(500).json({ success: false, error: 'Failed to load program detail' });
+  }
+});
+
+// POST /api/v1/programs/:id/enroll
+router.post('/:id/enroll', authenticate, async (req: AuthedRequest, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+    const program = await prisma.program.findUnique({ where: { id } });
+    if (!program || !program.isActive) {
+      return res.status(404).json({ success: false, error: 'Program not found' });
+    }
+
+    if (!program.isPublic && program.userId !== userId) {
+      return res.status(403).json({ success: false, error: 'You cannot enroll in this private program' });
+    }
+
+    const enrollment = await prisma.programEnrollment.upsert({
+      where: { userId_programId: { userId, programId: id } },
+      update: {
+        isActive: true,
+        completedAt: null,
+        updatedAt: new Date(),
+      },
+      create: {
+        userId,
+        programId: id,
+        currentWeek: 1,
+        currentDay: 1,
+        completedDays: 0,
+        isActive: true,
+      },
+    });
+
+    await prisma.programEnrollmentUsage.create({
       data: {
-        ...program,
-        title: program.name,
-        level: program.difficulty,
-        focus: program.category,
-        duration: `${program.durationWeeks} week${program.durationWeeks === 1 ? '' : 's'} · ${program.daysPerWeek} day${program.daysPerWeek === 1 ? '' : 's'}/week`,
-        image: metadata.image || 'fit1.webp',
+        userId,
+        programId: id,
+        enrollmentId: enrollment.id,
+        action: 'ENROLL',
+      },
+    }).catch(() => null);
+
+    return res.json({ success: true, data: enrollment, enrollment });
+  } catch (error: any) {
+    console.error('[programs:enroll]', error);
+    return res.status(500).json({ success: false, error: 'Failed to enroll in program' });
+  }
+});
+
+// POST /api/v1/programs/:id/restart
+router.post('/:id/restart', authenticate, async (req: AuthedRequest, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+    const enrollment = await prisma.programEnrollment.upsert({
+      where: { userId_programId: { userId, programId: id } },
+      update: {
+        currentWeek: 1,
+        currentDay: 1,
+        completedDays: 0,
+        isActive: true,
+        completedAt: null,
+        updatedAt: new Date(),
+      },
+      create: {
+        userId,
+        programId: id,
+        currentWeek: 1,
+        currentDay: 1,
+        completedDays: 0,
+        isActive: true,
       },
     });
-  } catch (error) {
-    console.error('Get program by id error:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch program.' });
-  }
-});
 
-// ─── POST /api/v1/programs/:id/enroll ────────────────────────────────────────
-// Called by: ProgramsAPI.enrollInProgram(programId)
-router.post('/:id/enroll', async (req: Request, res: Response) => {
-  try {
-    const programId = req.params.id;
-    const userId    = requireUserId(req, res);
-    if (!userId) return;
-
-    const program = await prisma.program.findUnique({ where: { id: programId } });
-    if (!program) {
-      res.status(404).json({ success: false, error: 'Program not found.' });
-      return;
-    }
-
-    const existing = await prisma.programEnrollment.findUnique({
-      where: { userId_programId: { userId, programId } },
-    });
-
-    if (existing) {
-      const totalDays = (program.durationWeeks ?? 0) * (program.daysPerWeek ?? 0);
-      const isCompletedOrInactive =
-        !!existing.completedAt ||
-        existing.isActive === false ||
-        (totalDays > 0 && existing.completedDays >= totalDays);
-
-      if (!isCompletedOrInactive) {
-        res.status(409).json({ success: false, error: 'You are already enrolled in this program.' });
-        return;
-      }
-
-      const quota = await getProgramQuotaState(userId);
-      if (quota.enforce && quota.used >= quota.max) {
-        quotaExceededResponse(res, quota);
-        return;
-      }
-
-      const restarted = await prisma.$transaction(async (tx) => {
-        const updated = await tx.programEnrollment.update({
-          where: { id: existing.id },
-          data: {
-            startDate:     new Date(),
-            currentWeek:   1,
-            currentDay:    1,
-            completedDays: 0,
-            isActive:      true,
-            completedAt:   null,
-          },
-          include: { program: true },
-        });
-
-        if (quota.enforce) {
-          await tx.programEnrollmentUsage.create({
-            data: {
-              userId,
-              programId,
-              enrollmentId: existing.id,
-              action: 'RESTART',
-            },
-          });
-        }
-
-        return updated;
-      });
-
-      res.status(200).json({
-        success: true,
-        data: restarted,
-        message: 'Program restarted from the beginning.',
-      });
-      return;
-    }
-
-    const quota = await getProgramQuotaState(userId);
-    if (quota.enforce && quota.used >= quota.max) {
-      quotaExceededResponse(res, quota);
-      return;
-    }
-
-    const enrollment = await prisma.programEnrollment.create({
-      data:    { userId, programId },
-      include: { program: true },
-    });
-
-    res.status(201).json({ success: true, data: enrollment });
-  } catch (error) {
-    console.error('Enroll in program error:', error);
-    res.status(500).json({ success: false, error: 'Enrollment failed.' });
-  }
-});
-
-// ─── PUT /api/v1/programs/enrollments/:enrollmentId/progress ─────────────────
-// Called by: ProgramsAPI.updateProgress(enrollmentId, data)
-router.put('/enrollments/:enrollmentId/progress', async (req: Request, res: Response) => {
-  try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-    const { enrollmentId }                        = req.params;
-    const { currentWeek, currentDay, completedDays } = req.body;
-
-    const enrollment = await prisma.programEnrollment.findFirst({
-      where: { id: enrollmentId, userId },
-    });
-    if (!enrollment) {
-      res.status(404).json({ success: false, error: 'Enrollment not found.' });
-      return;
-    }
-
-    const program = await prisma.program.findUnique({
-      where:  { id: enrollment.programId },
-      select: { durationWeeks: true, daysPerWeek: true },
-    });
-
-    const totalDays    = (program?.durationWeeks ?? 0) * (program?.daysPerWeek ?? 0);
-    const newCompleted = completedDays ?? enrollment.completedDays;
-    const isCompleted  = totalDays > 0 && newCompleted >= totalDays;
-
-    const updated = await prisma.programEnrollment.update({
-      where: { id: enrollmentId },
-      data:  {
-        ...(currentWeek   !== undefined && { currentWeek }),
-        ...(currentDay    !== undefined && { currentDay }),
-        ...(completedDays !== undefined && { completedDays }),
-        ...(isCompleted && { completedAt: new Date(), isActive: false }),
+    await prisma.programEnrollmentUsage.create({
+      data: {
+        userId,
+        programId: id,
+        enrollmentId: enrollment.id,
+        action: 'RESTART',
       },
-      include: { program: true },
-    });
+    }).catch(() => null);
 
-    res.status(200).json({ success: true, data: updated });
+    return res.json({ success: true, data: enrollment, enrollment });
   } catch (error) {
-    console.error('Update enrollment progress error:', error);
-    res.status(500).json({ success: false, error: 'Failed to update progress.' });
-  }
-});
-
-// ─── DELETE /api/v1/programs/enrollments/:enrollmentId ───────────────────────
-// Called by: ProgramsAPI.cancelEnrollment(enrollmentId)
-// Removes the enrollment so the user can re-enroll from scratch.
-router.delete('/enrollments/:enrollmentId', async (req: Request, res: Response) => {
-  try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
-    const { enrollmentId } = req.params;
-
-    const enrollment = await prisma.programEnrollment.findFirst({
-      where: { id: enrollmentId, userId },
-    });
-    if (!enrollment) {
-      res.status(404).json({ success: false, error: 'Enrollment not found.' });
-      return;
-    }
-
-    // Soft-cancel instead of deleting. Hard delete erased the monthly Free-plan
-    // usage record and let users regain slots by cancelling/restarting.
-    const cancelled = await prisma.programEnrollment.update({
-      where: { id: enrollmentId },
-      data:  { isActive: false },
-      include: { program: true },
-    });
-
-    res.status(200).json({ success: true, data: cancelled, message: 'Enrollment cancelled.' });
-  } catch (error) {
-    console.error('Cancel enrollment error:', error);
-    res.status(500).json({ success: false, error: 'Failed to cancel enrollment.' });
+    console.error('[programs:restart]', error);
+    return res.status(500).json({ success: false, error: 'Failed to restart program' });
   }
 });
 
