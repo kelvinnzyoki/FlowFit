@@ -87,39 +87,56 @@ export type AuthRequest = Request;
 //   This middleware now ONLY verifies access tokens. It never reads the cookie.
 //
 export const authenticate: RequestHandler = async (req, res, next) => {
-  // Prefer the Authorization header (sent by the frontend when it has an
-  // in-memory access token). Fall back to the ff_access httpOnly cookie so
-  // that cookie-only flows work without the frontend touching localStorage.
-  let token: string | undefined;
+  // Prefer the frontend Bearer access token, but keep a safe cookie fallback.
+  // This matters after moving the frontend host: old localStorage Bearer tokens
+  // can remain in the browser while the new httpOnly ff_access cookie is valid.
+  // If the header token fails, we try the cookie token before rejecting.
   const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    token = authHeader.slice(7);
-  } else if (req.cookies?.ff_access) {
-    token = req.cookies.ff_access as string;
-  }
+  const headerToken = authHeader?.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : undefined;
+  const cookieToken = req.cookies?.ff_access as string | undefined;
 
-  if (!token) {
-    res.status(401).json({ success: false, error: 'Authentication required.' });
+  if (!headerToken && !cookieToken) {
+    res.status(401).json({
+      success: false,
+      error: 'Authentication required.',
+      code: 'AUTH_REQUIRED',
+    });
     return;
   }
 
-  // Verify signature and expiry separately so we can return a distinct error
-  // code for expired tokens, letting the frontend know to call /refresh
-  // rather than redirect to login.
   let decoded: { userId: string };
   try {
-    decoded = jwt.verify(token, JWT_ACCESS_SECRET) as { userId: string };
-  } catch (err: any) {
-    if (err.name === 'TokenExpiredError') {
-      res.status(401).json({
-        success: false,
-        error:   'Access token expired.',
-        code:    'TOKEN_EXPIRED',   // frontend checks this to trigger /refresh
-      });
+    decoded = jwt.verify(headerToken || cookieToken!, JWT_ACCESS_SECRET) as { userId: string };
+  } catch (headerErr: any) {
+    if (headerToken && cookieToken && headerToken !== cookieToken) {
+      try {
+        decoded = jwt.verify(cookieToken, JWT_ACCESS_SECRET) as { userId: string };
+      } catch (cookieErr: any) {
+        if (cookieErr.name === 'TokenExpiredError') {
+          res.status(401).json({
+            success: false,
+            error: 'Access token expired.',
+            code: 'TOKEN_EXPIRED',
+          });
+        } else {
+          res.status(401).json({ success: false, error: 'Invalid token.', code: 'INVALID_TOKEN' });
+        }
+        return;
+      }
     } else {
-      res.status(401).json({ success: false, error: 'Invalid token.' });
+      if (headerErr.name === 'TokenExpiredError') {
+        res.status(401).json({
+          success: false,
+          error: 'Access token expired.',
+          code: 'TOKEN_EXPIRED',
+        });
+      } else {
+        res.status(401).json({ success: false, error: 'Invalid token.', code: 'INVALID_TOKEN' });
+      }
+      return;
     }
-    return;
   }
 
   try {
