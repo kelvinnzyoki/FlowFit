@@ -181,7 +181,7 @@ async function getProgramQuotaState(userId: string) {
 
   const [initialEnrollmentsThisMonth, restartsThisMonth] = await Promise.all([
     prisma.programEnrollment.count({ where: { userId, createdAt: { gte: monthStart } } }),
-    prisma.programEnrollmentUsage.count({ where: { userId, createdAt: { gte: monthStart } } }),
+    prisma.programEnrollmentUsage.count({ where: { userId, action: { startsWith: 'RESTART' }, createdAt: { gte: monthStart } } }),
   ]);
 
   const used = initialEnrollmentsThisMonth + restartsThisMonth;
@@ -237,6 +237,22 @@ function programInclude() {
   };
 }
 
+function enrollmentInclude() {
+  return {
+    program: { include: programInclude() },
+    usageRecords: { orderBy: { createdAt: 'asc' as const } },
+  };
+}
+
+function materializeEnrollment(enrollment: any) {
+  if (!enrollment) return null;
+  return {
+    ...enrollment,
+    program: enrollment.program ? materializeProgram(enrollment.program) : enrollment.program,
+    usageRecords: Array.isArray(enrollment.usageRecords) ? enrollment.usageRecords : [],
+  };
+}
+
 // GET /api/v1/programs
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -284,10 +300,10 @@ router.get('/my-enrollments', async (req: Request, res: Response) => {
     if (!userId) return;
     const enrollments = await prisma.programEnrollment.findMany({
       where: { userId },
-      include: { program: { include: programInclude() } },
+      include: enrollmentInclude(),
       orderBy: { createdAt: 'desc' },
     });
-    res.status(200).json({ success: true, data: enrollments.map((e: any) => ({ ...e, program: materializeProgram(e.program) })) });
+    res.status(200).json({ success: true, data: enrollments.map(materializeEnrollment) });
   } catch (error) {
     console.error('Get enrollments error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch your programs.' });
@@ -490,9 +506,20 @@ router.post('/:id/enroll', async (req: Request, res: Response) => {
       return;
     }
 
-    const existing = await prisma.programEnrollment.findUnique({ where: { userId_programId: { userId, programId } } });
+    const existing = await prisma.programEnrollment.findUnique({
+      where: { userId_programId: { userId, programId } },
+      include: enrollmentInclude(),
+    });
+
+    // Smooth UX rule: clicking Enroll again must not reset progress. If an active
+    // enrollment exists, return it as success so the frontend can unlock workouts.
     if (existing && existing.isActive && !existing.completedAt) {
-      res.status(409).json({ success: false, error: 'You are already enrolled in this program.' });
+      res.status(200).json({
+        success: true,
+        alreadyEnrolled: true,
+        message: 'You are already enrolled in this program.',
+        data: materializeEnrollment(existing),
+      });
       return;
     }
 
@@ -502,11 +529,22 @@ router.post('/:id/enroll', async (req: Request, res: Response) => {
       return;
     }
 
-    const enrollment = existing
-      ? await prisma.programEnrollment.update({ where: { id: existing.id }, data: { startDate: new Date(), currentWeek: 1, currentDay: 1, completedDays: 0, isActive: true, completedAt: null }, include: { program: true } })
-      : await prisma.programEnrollment.create({ data: { userId, programId }, include: { program: true } });
+    let enrollment: any;
+    if (existing) {
+      await prisma.programEnrollmentUsage.deleteMany({ where: { enrollmentId: existing.id } });
+      enrollment = await prisma.programEnrollment.update({
+        where: { id: existing.id },
+        data: { startDate: new Date(), currentWeek: 1, currentDay: 1, completedDays: 0, isActive: true, completedAt: null },
+        include: enrollmentInclude(),
+      });
+    } else {
+      enrollment = await prisma.programEnrollment.create({
+        data: { userId, programId },
+        include: enrollmentInclude(),
+      });
+    }
 
-    res.status(existing ? 200 : 201).json({ success: true, data: enrollment });
+    res.status(existing ? 200 : 201).json({ success: true, data: materializeEnrollment(enrollment) });
   } catch (error) {
     console.error('Enroll in program error:', error);
     res.status(500).json({ success: false, error: 'Enrollment failed.' });
@@ -514,8 +552,45 @@ router.post('/:id/enroll', async (req: Request, res: Response) => {
 });
 
 router.post('/:id/restart', async (req: Request, res: Response) => {
-  req.url = `/${req.params.id}/enroll`;
-  router.handle(req, res, () => undefined);
+  try {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    const programId = req.params.id;
+
+    const program = await prisma.program.findFirst({ where: accessibleProgramWhere(userId, { id: programId }) });
+    if (!program) {
+      res.status(404).json({ success: false, error: 'Program not found or not accessible for this account.' });
+      return;
+    }
+
+    const existing = await prisma.programEnrollment.findUnique({ where: { userId_programId: { userId, programId } } });
+
+    const quota = await getProgramQuotaState(userId);
+    if (!existing && quota.enforce && quota.used >= quota.max) {
+      quotaExceededResponse(res, quota);
+      return;
+    }
+
+    let enrollment: any;
+    if (existing) {
+      await prisma.programEnrollmentUsage.deleteMany({ where: { enrollmentId: existing.id } });
+      enrollment = await prisma.programEnrollment.update({
+        where: { id: existing.id },
+        data: { startDate: new Date(), currentWeek: 1, currentDay: 1, completedDays: 0, isActive: true, completedAt: null },
+        include: enrollmentInclude(),
+      });
+      await prisma.programEnrollmentUsage.create({
+        data: { userId, programId, enrollmentId: existing.id, action: 'RESTART' },
+      });
+    } else {
+      enrollment = await prisma.programEnrollment.create({ data: { userId, programId }, include: enrollmentInclude() });
+    }
+
+    res.status(existing ? 200 : 201).json({ success: true, restarted: true, data: materializeEnrollment(enrollment) });
+  } catch (error) {
+    console.error('Restart program error:', error);
+    res.status(500).json({ success: false, error: 'Restart failed.' });
+  }
 });
 
 router.put('/enrollments/:enrollmentId/progress', async (req: Request, res: Response) => {
@@ -538,9 +613,9 @@ router.put('/enrollments/:enrollmentId/progress', async (req: Request, res: Resp
         ...(currentDay !== undefined ? { currentDay } : {}),
         ...(completedDays !== undefined ? { completedDays } : {}),
       },
-      include: { program: true },
+      include: enrollmentInclude(),
     });
-    res.status(200).json({ success: true, data: updated });
+    res.status(200).json({ success: true, data: materializeEnrollment(updated) });
   } catch (error) {
     console.error('Update enrollment progress error:', error);
     res.status(500).json({ success: false, error: 'Failed to update progress.' });

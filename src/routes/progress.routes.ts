@@ -68,6 +68,15 @@ router.post('/', async (req: AuthRequest, res: Response) => {
       bodyWeight,
       bodyWeightKg,
       weight,
+      programId,
+      enrollmentId,
+      dayIndex,
+      exerciseIndex,
+      dayExerciseCount,
+      currentWeek,
+      currentDay,
+      nextWeek,
+      nextDay,
     } = req.body;
 
     if (!exerciseId || !duration) {
@@ -129,6 +138,83 @@ router.post('/', async (req: AuthRequest, res: Response) => {
       ]);
     }
 
+    let programProgress: any = null;
+
+    // Server-side program workout completion. The frontend sends program context
+    // from the Program Detail → Workout Session link. We persist one usage record
+    // per completed workout and advance the enrollment when all workouts in the
+    // current day are done. No browser/localStorage state is trusted.
+    if (programId && enrollmentId && dayIndex !== undefined && exerciseIndex !== undefined) {
+      const safeDayIndex = Number(dayIndex);
+      const safeExerciseIndex = Number(exerciseIndex);
+      const safeDayExerciseCount = Number(dayExerciseCount);
+
+      if (Number.isFinite(safeDayIndex) && Number.isFinite(safeExerciseIndex)) {
+        const enrollment = await prisma.programEnrollment.findFirst({
+          where: {
+            id: String(enrollmentId),
+            userId,
+            programId: String(programId),
+            isActive: true,
+          },
+        });
+
+        if (enrollment && !enrollment.completedAt) {
+          const action = `WORKOUT_LOGGED:${safeDayIndex}:${safeExerciseIndex}`;
+
+          const existingUsage = await prisma.programEnrollmentUsage.findFirst({
+            where: {
+              userId,
+              programId: String(programId),
+              enrollmentId: enrollment.id,
+              action,
+            },
+            select: { id: true },
+          });
+
+          if (!existingUsage) {
+            await prisma.programEnrollmentUsage.create({
+              data: {
+                userId,
+                programId: String(programId),
+                enrollmentId: enrollment.id,
+                action,
+              },
+            });
+          }
+
+          const completedForDay = await prisma.programEnrollmentUsage.count({
+            where: {
+              userId,
+              programId: String(programId),
+              enrollmentId: enrollment.id,
+              action: { startsWith: `WORKOUT_LOGGED:${safeDayIndex}:` },
+            },
+          });
+
+          const shouldAdvanceDay = Number.isFinite(safeDayExerciseCount)
+            && safeDayExerciseCount > 0
+            && completedForDay >= safeDayExerciseCount
+            && enrollment.completedDays <= safeDayIndex;
+
+          if (shouldAdvanceDay) {
+            const nextCompletedDays = safeDayIndex + 1;
+            const updatedEnrollment = await prisma.programEnrollment.update({
+              where: { id: enrollment.id },
+              data: {
+                completedDays: nextCompletedDays,
+                currentWeek: nextWeek !== undefined ? Number(nextWeek) || enrollment.currentWeek : (currentWeek !== undefined ? Number(currentWeek) || enrollment.currentWeek : enrollment.currentWeek),
+                currentDay: nextDay !== undefined ? Number(nextDay) || enrollment.currentDay : (currentDay !== undefined ? Number(currentDay) || enrollment.currentDay : enrollment.currentDay),
+              },
+            });
+            programProgress = { enrollment: updatedEnrollment, completedForDay, dayCompleted: true };
+          } else {
+            programProgress = { enrollment, completedForDay, dayCompleted: false };
+          }
+        }
+      }
+    }
+
     // Update streak and check milestone notifications after every logged workout.
     // Both are fire-and-forget — failures must never block the workout log response.
     await updateStreak(userId);
@@ -136,7 +222,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
       console.error('[progress] milestone check failed:', err)
     );
 
-    res.status(201).json({ success: true, data: log });
+    res.status(201).json({ success: true, data: log, programProgress });
   } catch (error) {
     console.error('Log workout error:', error);
     res.status(500).json({ success: false, error: 'Failed to log workout.' });
