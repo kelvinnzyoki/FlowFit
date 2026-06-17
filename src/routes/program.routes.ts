@@ -132,6 +132,15 @@ function materializeProgram(program: any) {
     ? w.days.reduce((dSum: number, d: any) => dSum + (Array.isArray(d.exercises) ? d.exercises.length : 0), 0)
     : 0), 0);
 
+  const activeEnrollment = Array.isArray(program?.enrollments) && program.enrollments.length
+    ? program.enrollments[0]
+    : null;
+
+  const enrollmentCompletedDays = Number(activeEnrollment?.completedDays ?? activeEnrollment?.completed_days ?? 0);
+  const enrollmentProgress = totalDays > 0 && Number.isFinite(enrollmentCompletedDays)
+    ? Math.max(0, Math.min(100, Math.round((enrollmentCompletedDays / totalDays) * 100)))
+    : 0;
+
   return {
     ...program,
     metadata,
@@ -151,6 +160,11 @@ function materializeProgram(program: any) {
     totalWeeks: weeks.length,
     totalDays,
     totalExercises,
+    isEnrolled: Boolean(activeEnrollment),
+    enrolled: Boolean(activeEnrollment),
+    activeEnrollment,
+    currentEnrollment: activeEnrollment,
+    enrollmentProgress,
     hasPersistedSchedule: hasRealWeeks,
     scheduleSource: hasRealWeeks ? 'database' : (Array.isArray(aiPlan?.exercises) && aiPlan.exercises.length ? 'metadata.aiPlan' : 'server-template'),
   };
@@ -213,8 +227,8 @@ function accessibleProgramWhere(userId: string, extra: Record<string, any> = {})
   };
 }
 
-function programInclude() {
-  return {
+function programInclude(userId?: string) {
+  const include: any = {
     weeks: {
       orderBy: { weekNumber: 'asc' as const },
       include: {
@@ -235,6 +249,18 @@ function programInclude() {
     },
     _count: { select: { weeks: true, enrollments: true } },
   };
+
+  // Include only this user's active enrollment so the frontend can mark
+  // already-enrolled programs before the user opens the detail page.
+  if (userId) {
+    include.enrollments = {
+      where: { userId, isActive: true },
+      orderBy: { createdAt: 'desc' as const },
+      take: 1,
+    };
+  }
+
+  return include;
 }
 
 function enrollmentInclude() {
@@ -280,7 +306,7 @@ router.get('/', async (req: Request, res: Response) => {
         take,
         skip,
         orderBy: [{ isPublic: 'desc' }, { createdAt: 'desc' }],
-        include: programInclude(),
+        include: programInclude(userId),
       }),
       prisma.program.count({ where }),
     ]);
@@ -317,7 +343,7 @@ router.get('/ai-generated', async (req: Request, res: Response) => {
     const program = await prisma.program.findFirst({
       where: { userId, type: 'ai_generated', isActive: true },
       orderBy: { updatedAt: 'desc' },
-      include: programInclude(),
+      include: programInclude(userId),
     });
     if (!program) {
       res.status(404).json({ success: false, error: 'No AI program found.' });
@@ -339,7 +365,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
     const program = await prisma.program.findFirst({
       where: accessibleProgramWhere(userId, { id: programId }),
-      include: programInclude(),
+      include: programInclude(userId),
     });
 
     if (!program) {
@@ -447,7 +473,7 @@ router.post('/', async (req: Request, res: Response) => {
         isPublic: false,
         ...(weeksCreate ? { weeks: weeksCreate } : {}),
       },
-      include: programInclude(),
+      include: programInclude(userId),
     });
     res.status(201).json({ success: true, data: materializeProgram(program) });
   } catch (error) {
