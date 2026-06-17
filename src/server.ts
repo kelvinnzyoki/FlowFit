@@ -19,7 +19,7 @@ import paystackWebhookRoutes from './routes/paystack.webhook.routes.js';
 import exerciseRoutes from './routes/exercise.routes.js';
 import aiRoutes from './routes/ai.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
-//import adminRoutes from './routes/admin.routes.js';
+import adminRoutes from './routes/admin.routes.js';
 
 const app: Application = express();
 
