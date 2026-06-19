@@ -1,30 +1,88 @@
 import { Router, Request, Response } from 'express';
-import prisma from '../config/db.js';
 import { Prisma } from '@prisma/client';
+import prisma from '../config/db.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
 router.use(authenticate);
 
-const PROGRAM_LOG_PLACEHOLDER_DESCRIPTION = 'Auto-created from program workout logging because no library Exercise was linked';
+const PLACEHOLDER_DESCRIPTION = 'Auto-created from program workout logging because no library Exercise was linked.';
 
-function libraryExerciseWhere(base: Prisma.ExerciseWhereInput = {}): Prisma.ExerciseWhereInput {
-  return {
-    ...base,
-    isActive: true,
-    NOT: {
-      description: {
-        contains: PROGRAM_LOG_PLACEHOLDER_DESCRIPTION,
-        mode: Prisma.QueryMode.insensitive,
-      },
-    },
-  };
-}
+const ALIAS_TO_EXERCISE_ID: Record<string, string> = {
+  pushup: 'ex-pushup',
+  pushups: 'ex-pushup',
+  'push-ups': 'ex-pushup',
+  squat: 'ex-squat',
+  squats: 'ex-squat',
+  lunge: 'ex-lunge',
+  lunges: 'ex-lunge',
+  dips: 'ex-dips',
+  tricepdips: 'ex-dips',
+  'tricep-dips': 'ex-dips',
+  glutebridges: 'ex-glute',
+  'glute-bridges': 'ex-glute',
+  pikepushups: 'ex-pike',
+  'pike-pushups': 'ex-pike',
+  burpee: 'ex-burpee',
+  burpees: 'ex-burpee',
+  jumpingjacks: 'ex-jjack',
+  'jumping-jacks': 'ex-jjack',
+  highknees: 'ex-hknees',
+  'high-knees': 'ex-hknees',
+  buttkicks: 'ex-bkicks',
+  'butt-kicks': 'ex-bkicks',
+  plank: 'ex-plank',
+  mountainclimbers: 'ex-mclimb',
+  'mountain-climbers': 'ex-mclimb',
+  crunch: 'ex-crunch',
+  crunches: 'ex-crunch',
+  russiantwists: 'ex-rtwist',
+  'russian-twists': 'ex-rtwist',
+  legraises: 'ex-lraise',
+  'leg-raises': 'ex-lraise',
+  jumpsquats: 'ex-sqjmp',
+  'jump-squats': 'ex-sqjmp',
+  boxjumps: 'ex-boxjmp',
+  'box-jumps': 'ex-boxjmp',
+  sprintintervals: 'ex-sprint',
+  'sprint-intervals': 'ex-sprint',
+  sprints: 'ex-sprint',
+  downwarddog: 'ex-ddog',
+  'downward-dog': 'ex-ddog',
+  childpose: 'ex-child',
+  'child-pose': 'ex-child',
+  childrenspose: 'ex-child',
+  'childs-pose': 'ex-child',
+  hipflexorstretch: 'ex-hipfx',
+  'hip-flexor-stretch': 'ex-hipfx',
+  hipflexor: 'ex-hipfx',
+};
 
 function toPositiveInt(value: unknown, fallback: number) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizeExerciseKey(value: unknown) {
+  return String(value ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/&/g, 'and')
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function isPlaceholderDescription(description: unknown) {
+  return String(description ?? '').trim() === PLACEHOLDER_DESCRIPTION;
+}
+
+function publicExerciseWhere(extra?: Prisma.ExerciseWhereInput): Prisma.ExerciseWhereInput {
+  return {
+    isActive: true,
+    NOT: { description: PLACEHOLDER_DESCRIPTION },
+    ...(extra || {}),
+  };
 }
 
 function dayExerciseToExerciseLike(dayExercise: any) {
@@ -33,8 +91,8 @@ function dayExerciseToExerciseLike(dayExercise: any) {
     id: dayExercise.exerciseId || dayExercise.id,
     name: linked?.name || dayExercise.exerciseName || 'Program Exercise',
     description: linked?.description || dayExercise.notes || 'Program exercise from your FlowFit training plan.',
-    category: linked?.category || 'Program',
-    caloriesPerMin: linked?.caloriesPerMin ?? 0,
+    category: linked?.category || dayExercise.category || 'Program',
+    caloriesPerMin: linked?.caloriesPerMin ?? dayExercise.caloriesPerMin ?? 0,
     isActive: true,
     createdAt: dayExercise.createdAt || new Date(),
     dayExerciseId: dayExercise.id,
@@ -43,6 +101,33 @@ function dayExerciseToExerciseLike(dayExercise: any) {
     restSeconds: dayExercise.restSeconds,
     notes: dayExercise.notes,
   };
+}
+
+async function findRealExerciseByIdAliasOrName(id: string) {
+  const trimmed = String(id || '').trim();
+  if (!trimmed) return null;
+
+  const direct = await prisma.exercise.findUnique({ where: { id: trimmed } });
+  if (direct?.isActive && !isPlaceholderDescription(direct.description)) return direct;
+
+  const normalized = normalizeExerciseKey(trimmed);
+  const aliasId = ALIAS_TO_EXERCISE_ID[trimmed.toLowerCase()] || ALIAS_TO_EXERCISE_ID[normalized];
+
+  if (aliasId && aliasId !== trimmed) {
+    const aliasExercise = await prisma.exercise.findUnique({ where: { id: aliasId } });
+    if (aliasExercise?.isActive && !isPlaceholderDescription(aliasExercise.description)) return aliasExercise;
+  }
+
+  const candidates = await prisma.exercise.findMany({
+    where: publicExerciseWhere(),
+    take: 200,
+    orderBy: { name: 'asc' },
+  });
+
+  return candidates.find((exercise) => {
+    const keys = [exercise.id, exercise.name].map(normalizeExerciseKey);
+    return keys.includes(normalized);
+  }) || null;
 }
 
 // ─── GET /api/v1/workouts ────────────────────────────────────────────────────
@@ -55,16 +140,16 @@ router.get('/', async (req: Request, res: Response) => {
     const page = toPositiveInt(req.query.page, 1);
     const skip = (page - 1) * take;
 
-    const where = libraryExerciseWhere();
+    const where: Prisma.ExerciseWhereInput = publicExerciseWhere();
 
     if (category && category !== 'All') where.category = category;
 
     if (q && q.trim()) {
       const needle = q.trim();
       where.OR = [
-        { name:        { contains: needle, mode: Prisma.QueryMode.insensitive } },
+        { name: { contains: needle, mode: Prisma.QueryMode.insensitive } },
         { description: { contains: needle, mode: Prisma.QueryMode.insensitive } },
-        { category:    { contains: needle, mode: Prisma.QueryMode.insensitive } },
+        { category: { contains: needle, mode: Prisma.QueryMode.insensitive } },
       ];
     }
 
@@ -102,11 +187,11 @@ router.get('/search', async (req: Request, res: Response) => {
 
     const needle = q.trim();
     const exercises = await prisma.exercise.findMany({
-      where: libraryExerciseWhere({
+      where: publicExerciseWhere({
         OR: [
-          { name:        { contains: needle, mode: Prisma.QueryMode.insensitive } },
+          { name: { contains: needle, mode: Prisma.QueryMode.insensitive } },
           { description: { contains: needle, mode: Prisma.QueryMode.insensitive } },
-          { category:    { contains: needle, mode: Prisma.QueryMode.insensitive } },
+          { category: { contains: needle, mode: Prisma.QueryMode.insensitive } },
         ],
       }),
       orderBy: { name: 'asc' },
@@ -121,23 +206,17 @@ router.get('/search', async (req: Request, res: Response) => {
 });
 
 // ─── GET /api/v1/workouts/:id ─────────────────────────────────────────────────
-// Supports both real Exercise.id and DayExercise.id from program detail pages.
-// If a DayExercise is not linked to a library Exercise, the response is shaped
-// like an Exercise so the React workout-session page can still render and log it.
+// Supports real Exercise.id, common frontend aliases such as "childpose", and
+// DayExercise.id from program detail pages. Placeholder auto-created exercises
+// are intentionally ignored so they do not shadow the real library exercises.
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id || '').trim();
 
-    const exercise = await prisma.exercise.findUnique({ where: { id } });
-    if (exercise?.isActive) {
-      const isPlaceholder = (exercise.description || '')
-        .toLowerCase()
-        .includes(PROGRAM_LOG_PLACEHOLDER_DESCRIPTION.toLowerCase());
-
-      if (!isPlaceholder) {
-        res.status(200).json({ success: true, data: exercise });
-        return;
-      }
+    const exercise = await findRealExerciseByIdAliasOrName(id);
+    if (exercise) {
+      res.status(200).json({ success: true, data: exercise });
+      return;
     }
 
     const dayExercise = await prisma.dayExercise.findUnique({
