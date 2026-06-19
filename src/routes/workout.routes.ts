@@ -6,15 +6,41 @@ const router = Router();
 
 router.use(authenticate);
 
+const PROGRAM_LOG_PLACEHOLDER_DESCRIPTION =
+  'Auto-created from program workout logging because no library Exercise was linked';
+
 function toPositiveInt(value: unknown, fallback: number) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function dayExerciseToExerciseLike(dayExercise: any) {
-  const linked = dayExercise.exercise;
+function isProgramLogPlaceholder(exercise: any) {
+  const description = String(exercise?.description || '').toLowerCase();
+  return description.includes(PROGRAM_LOG_PLACEHOLDER_DESCRIPTION.toLowerCase());
+}
+
+function libraryExerciseOnlyWhere(extra: Record<string, unknown> = {}) {
   return {
-    id: dayExercise.exerciseId || dayExercise.id,
+    isActive: true,
+    NOT: [
+      {
+        description: {
+          contains: PROGRAM_LOG_PLACEHOLDER_DESCRIPTION,
+          mode: 'insensitive',
+        },
+      },
+    ],
+    ...extra,
+  };
+}
+
+function dayExerciseToExerciseLike(dayExercise: any) {
+  const linked = dayExercise.exercise && !isProgramLogPlaceholder(dayExercise.exercise)
+    ? dayExercise.exercise
+    : null;
+
+  return {
+    id: linked?.id || dayExercise.exerciseId || dayExercise.id,
     name: linked?.name || dayExercise.exerciseName || 'Program Exercise',
     description: linked?.description || dayExercise.notes || 'Program exercise from your FlowFit training plan.',
     category: linked?.category || 'Program',
@@ -30,7 +56,8 @@ function dayExerciseToExerciseLike(dayExercise: any) {
 }
 
 // ─── GET /api/v1/workouts ────────────────────────────────────────────────────
-// Frontend receives Exercise rows and normalizes them into Workout cards.
+// Frontend receives only real library Exercise rows and normalizes them into
+// Workout cards. Program-log placeholder exercises are deliberately hidden.
 // Supports: ?category=&q=&limit=&page=
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -39,17 +66,20 @@ router.get('/', async (req: Request, res: Response) => {
     const page = toPositiveInt(req.query.page, 1);
     const skip = (page - 1) * take;
 
-    const where: Record<string, unknown> = { isActive: true };
+    const extraWhere: Record<string, unknown> = {};
 
-    if (category && category !== 'All') where.category = category;
+    if (category && category !== 'All') extraWhere.category = category;
 
     if (q && q.trim()) {
-      where.OR = [
-        { name:        { contains: q.trim(), mode: 'insensitive' } },
-        { description: { contains: q.trim(), mode: 'insensitive' } },
-        { category:    { contains: q.trim(), mode: 'insensitive' } },
+      const needle = q.trim();
+      extraWhere.OR = [
+        { name:        { contains: needle, mode: 'insensitive' } },
+        { description: { contains: needle, mode: 'insensitive' } },
+        { category:    { contains: needle, mode: 'insensitive' } },
       ];
     }
+
+    const where = libraryExerciseOnlyWhere(extraWhere);
 
     const [exercises, total] = await Promise.all([
       prisma.exercise.findMany({ where, take, skip, orderBy: { name: 'asc' } }),
@@ -85,14 +115,13 @@ router.get('/search', async (req: Request, res: Response) => {
 
     const needle = q.trim();
     const exercises = await prisma.exercise.findMany({
-      where: {
-        isActive: true,
+      where: libraryExerciseOnlyWhere({
         OR: [
           { name:        { contains: needle, mode: 'insensitive' } },
           { description: { contains: needle, mode: 'insensitive' } },
           { category:    { contains: needle, mode: 'insensitive' } },
         ],
-      },
+      }),
       orderBy: { name: 'asc' },
       take: 20,
     });
@@ -106,14 +135,14 @@ router.get('/search', async (req: Request, res: Response) => {
 
 // ─── GET /api/v1/workouts/:id ─────────────────────────────────────────────────
 // Supports both real Exercise.id and DayExercise.id from program detail pages.
-// If a DayExercise is not linked to a library Exercise, the response is shaped
-// like an Exercise so the React workout-session page can still render and log it.
+// Auto-created program-log placeholder Exercise rows are not treated as library
+// exercises, so they cannot pollute the workout/exercise page.
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id || '').trim();
 
     const exercise = await prisma.exercise.findUnique({ where: { id } });
-    if (exercise?.isActive) {
+    if (exercise?.isActive && !isProgramLogPlaceholder(exercise)) {
       res.status(200).json({ success: true, data: exercise });
       return;
     }
