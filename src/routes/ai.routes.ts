@@ -139,21 +139,35 @@ async function createAiProgramWithLiveDbCompatibility(tx: any, args: {
 // ─────────────────────────────────────────────────────────────
 // POST /api/v1/ai/generate-workout
 // ─────────────────────────────────────────────────────────────
-router.post('/generate-workout', requireAuth, async (req: Request, res: Response) => {
+const handleGenerateWorkout = async (req: Request, res: Response) => {
   try {
     if (!req.user?.id) return res.status(401).json({ success: false, message: 'Authentication required' });
 
     const plan = await workoutGenerator.generateWorkoutPlan({
-      ...req.body,
-      userId: req.user.id,
+      goal:                req.body.goal || req.body.fitnessGoal || 'general_fitness',
+      fitnessLevel:        req.body.fitnessLevel || req.body.level || 'beginner',
+      equipment:           Array.isArray(req.body.equipment) && req.body.equipment.length ? req.body.equipment : ['bodyweight'],
+      sessionDuration:     Number(req.body.sessionDuration || req.body.minutes || 30),
+      trainingDaysPerWeek: Number(req.body.trainingDaysPerWeek || req.body.daysPerWeek || 3),
+      limitations:         req.body.limitations || req.body.injuries || undefined,
+      userId:              req.user.id,
     });
 
-    res.json({ success: true, plan, message: 'Your personalized workout plan is ready!' });
+    res.json({
+      success: true,
+      data: plan,
+      plan,
+      message: 'Your personalized workout plan is ready!',
+    });
   } catch (error: any) {
-    console.error('[Route] generate-workout error:', error.message);
+    console.error('[Route] generate-workout error:', error?.message ?? error);
     res.status(500).json({ success: false, message: 'Failed to generate workout. Please try again.' });
   }
-});
+};
+
+router.post('/generate-workout', requireAuth, handleGenerateWorkout);
+router.post('/generate-workout-plan', requireAuth, handleGenerateWorkout);
+router.post('/generate-plan', requireAuth, handleGenerateWorkout);
 
 // ─────────────────────────────────────────────────────────────
 // POST /api/v1/ai/suggest-progression
