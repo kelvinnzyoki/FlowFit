@@ -161,35 +161,65 @@ router.get('/summary', async (_req: Request, res: Response, next: NextFunction) 
       return acc;
     }, {});
 
+    const totals = {
+      users: totalUsers,
+      totalUsers,
+      newUsersToday,
+      verifiedUsers,
+      programs: totalPrograms,
+      totalPrograms,
+      activePrograms,
+      enrollments: totalEnrollments,
+      totalEnrollments,
+      activeEnrollments,
+      workoutLogs: totalWorkoutLogs,
+      totalWorkoutLogs,
+      workoutsToday,
+      feedbackNew,
+      feedbackTotal,
+      revenueCents: successfulPayments._sum.amountCents || 0,
+      successfulRevenueCents: successfulPayments._sum.amountCents || 0,
+      paymentCount: successfulPayments._count._all || 0,
+      grossPaymentVolumeCents: totalPayments._sum.amountCents || 0,
+      totalRevenueCents: totalPayments._sum.amountCents || 0,
+    };
+
+    const recent = {
+      users: recentUsers,
+      subscriptions: recentSubscriptions,
+      feedback: recentFeedback,
+      workouts: recentWorkouts,
+    };
+
     res.json({
       success: true,
       data: {
-        totals: {
-          users: totalUsers,
-          newUsersToday,
-          verifiedUsers,
-          programs: totalPrograms,
-          activePrograms,
-          enrollments: totalEnrollments,
-          activeEnrollments,
-          workoutLogs: totalWorkoutLogs,
-          workoutsToday,
-          feedbackNew,
-          feedbackTotal,
-          revenueCents: successfulPayments._sum.amountCents || 0,
-          paymentCount: successfulPayments._count._all || 0,
-          grossPaymentVolumeCents: totalPayments._sum.amountCents || 0,
-        },
+        // Keep nested structure for newer clients.
+        totals,
         subscriptions: {
           byStatus: statusBreakdown,
           byPlan: planBreakdown,
         },
-        recent: {
-          users: recentUsers,
-          subscriptions: recentSubscriptions,
-          feedback: recentFeedback,
-          workouts: recentWorkouts,
-        },
+        recent,
+
+        // Also expose flat keys so older/current frontend cards do not render 0.
+        totalUsers,
+        newUsersToday,
+        verifiedUsers,
+        totalPrograms,
+        activePrograms,
+        totalEnrollments,
+        activeEnrollments,
+        totalWorkoutLogs,
+        workoutsToday,
+        feedbackNew,
+        feedbackTotal,
+        successfulRevenueCents: totals.successfulRevenueCents,
+        totalRevenueCents: totals.totalRevenueCents,
+        recentUsers,
+        recentSubscriptions,
+        recentFeedback,
+        recentWorkouts,
       },
     });
   } catch (err) {
