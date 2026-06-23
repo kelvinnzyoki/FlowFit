@@ -35,6 +35,25 @@ function titleCase(value: any) {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+const PROGRAM_IMAGE_BY_CATEGORY: Record<string, string> = {
+  strength: '/images/exercises/pushups.webp',
+  hiit: '/images/exercises/burpees1 (1).webp',
+  core: '/images/exercises/plank.webp',
+  mobility: '/images/exercises/downwarddog.webp',
+  flexibility: '/images/exercises/childpose.webp',
+  conditioning: '/images/exercises/sprints (1).webp',
+  cardio: '/images/exercises/highknees.webp',
+  general_fitness: '/images/fit1 (1).webp',
+};
+
+function pickProgramImage(program: any) {
+  const metadata = parseJsonMaybe(program?.metadata);
+  const existing = program?.image || program?.imageUrl || program?.coverImage || metadata?.image || metadata?.imageUrl || metadata?.coverImage;
+  if (existing) return existing;
+  const key = String(program?.category || metadata?.category || 'general_fitness').toLowerCase();
+  return PROGRAM_IMAGE_BY_CATEGORY[key] || PROGRAM_IMAGE_BY_CATEGORY.general_fitness;
+}
+
 function fallbackExercisesForCategory(category: string) {
   const key = String(category || 'general_fitness').toLowerCase();
   const templates: Record<string, Array<{ name: string; sets: number; reps: string; restSeconds: number; notes: string }>> = {
@@ -166,6 +185,9 @@ function materializeProgram(program: any) {
     currentEnrollment: activeEnrollment,
     enrollmentProgress,
     hasPersistedSchedule: hasRealWeeks,
+    image: pickProgramImage(program),
+    imageUrl: pickProgramImage(program),
+    coverImage: pickProgramImage(program),
     scheduleSource: hasRealWeeks ? 'database' : (Array.isArray(aiPlan?.exercises) && aiPlan.exercises.length ? 'metadata.aiPlan' : 'server-template'),
   };
 }
@@ -179,27 +201,22 @@ const QUOTA_ACTIVE_STATUSES = ['ACTIVE', 'TRIALING', 'GRACE_PERIOD'] as const;
 async function getProgramQuotaState(userId: string) {
   const monthStart = monthStartUtc();
 
+  // FlowFit is currently free-access: keep subscription/payment records intact,
+  // but do not enforce free-plan enrollment/restart quotas.
   const subscription = await prisma.subscription.findFirst({
     where: { userId, status: { in: QUOTA_ACTIVE_STATUSES as any } },
     orderBy: { createdAt: 'desc' },
     include: { plan: true },
-  });
+  }).catch(() => null);
 
-  const planSlug = subscription?.plan?.slug || 'free';
-  if (planSlug !== 'free') {
-    return { enforce: false, planSlug, max: Number.POSITIVE_INFINITY, used: 0, remaining: Number.POSITIVE_INFINITY, monthStart };
-  }
-
-  const freePlan = subscription?.plan || await prisma.plan.findUnique({ where: { slug: 'free' } });
-  const max = freePlan?.maxPrograms ?? 2;
-
-  const [initialEnrollmentsThisMonth, restartsThisMonth] = await Promise.all([
-    prisma.programEnrollment.count({ where: { userId, createdAt: { gte: monthStart } } }),
-    prisma.programEnrollmentUsage.count({ where: { userId, action: { startsWith: 'RESTART' }, createdAt: { gte: monthStart } } }),
-  ]);
-
-  const used = initialEnrollmentsThisMonth + restartsThisMonth;
-  return { enforce: true, planSlug, max, used, remaining: Math.max(0, max - used), monthStart };
+  return {
+    enforce: false,
+    planSlug: subscription?.plan?.slug || 'free',
+    max: Number.POSITIVE_INFINITY,
+    used: 0,
+    remaining: Number.POSITIVE_INFINITY,
+    monthStart,
+  };
 }
 
 function quotaExceededResponse(res: Response, quota: Awaited<ReturnType<typeof getProgramQuotaState>>) {
@@ -216,9 +233,14 @@ function quotaExceededResponse(res: Response, quota: Awaited<ReturnType<typeof g
 }
 
 function accessibleProgramWhere(userId: string, extra: Record<string, any> = {}) {
+  const cleanExtra = { ...extra };
+  if (!cleanExtra.type) {
+    cleanExtra.NOT = { type: 'ai_generated' };
+  }
+
   return {
     isActive: true,
-    ...extra,
+    ...cleanExtra,
     OR: [
       { isPublic: true },
       { userId },
@@ -297,7 +319,13 @@ router.get('/', async (req: Request, res: Response) => {
     if (mine === 'true') extra.userId = userId;
 
     const where = mine === 'true'
-      ? { isActive: true, userId, ...(difficulty ? { difficulty } : {}), ...(category ? { category } : {}), ...(type ? { type } : {}) }
+      ? {
+          isActive: true,
+          userId,
+          ...(difficulty ? { difficulty } : {}),
+          ...(category ? { category } : {}),
+          ...(type ? { type } : { NOT: { type: 'ai_generated' } }),
+        }
       : accessibleProgramWhere(userId, extra);
 
     const [programs, total] = await Promise.all([

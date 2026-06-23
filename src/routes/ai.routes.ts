@@ -305,6 +305,54 @@ router.post('/coach', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+
+function materializeGeneratedWorkoutPlan(plan: any) {
+  const exercises = Array.isArray(plan?.exercises) ? plan.exercises : [];
+  const metadata = parseJsonForGeneratedPlan(plan?.metadata);
+  return {
+    ...plan,
+    title: plan?.name || metadata?.workoutName || 'Generated Workout Plan',
+    type: 'generated_workout_plan',
+    isGeneratedPlan: true,
+    exercises,
+    metadata,
+    weeks: [
+      {
+        id: `generated-week-${plan.id}`,
+        weekNumber: 1,
+        name: 'Generated Plan',
+        days: [
+          {
+            id: `generated-day-${plan.id}`,
+            dayNumber: 1,
+            name: plan?.name || 'Generated Workout',
+            isRestDay: false,
+            exercises: exercises.map((ex: any, index: number) => ({
+              id: `generated-ex-${plan.id}-${index + 1}`,
+              orderIndex: Number(ex?.order ?? ex?.orderIndex ?? index),
+              exerciseName: ex?.name || ex?.exerciseName || `Exercise ${index + 1}`,
+              sets: Number(ex?.sets) || 3,
+              reps: String(ex?.reps || '10-15'),
+              restSeconds: Number(ex?.restSeconds) || 60,
+              notes: ex?.notes || ex?.formTip || '',
+              exerciseId: ex?.exerciseId || null,
+              exercise: ex?.exercise || null,
+            })),
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function parseJsonForGeneratedPlan(value: any) {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try { return JSON.parse(value); } catch { return {}; }
+  }
+  return typeof value === 'object' ? value : {};
+}
+
 // ─────────────────────────────────────────────────────────────
 // POST /api/v1/ai/save-program
 //
@@ -343,45 +391,37 @@ router.post('/save-program', requireAuth, async (req: Request, res: Response) =>
       return res.status(400).json({ success: false, message: 'At least one exercise is required' });
     }
 
-    const program = await prisma.$transaction(async (tx) => {
-      const existing = await tx.program.findMany({
-        where:  { userId, type: 'ai_generated' },
-        select: { id: true },
+    const savedPlan = await prisma.$transaction(async (tx) => {
+      await tx.generatedWorkoutPlan.updateMany({
+        where: { userId, isActive: true },
+        data:  { isActive: false },
       });
 
-      if (existing.length > 0) {
-        await tx.program.deleteMany({ where: { userId, type: 'ai_generated' } });
-        console.log(`[ai/save-program] Deleted ${existing.length} old AI program(s) for user ${userId}`);
-      }
-
-      return createAiProgramWithLiveDbCompatibility(tx, {
-        userId,
-        name,
-        description,
-        category,
-        difficulty,
-        metadata,
-        exercises,
+      return tx.generatedWorkoutPlan.create({
+        data: {
+          userId,
+          name:        name.trim(),
+          description: String(description || ''),
+          category:    String(category || 'general_fitness'),
+          difficulty:  String(difficulty || 'intermediate'),
+          metadata:    metadata || {},
+          exercises,
+          isActive:    true,
+        },
       });
     });
 
-    if (!program) {
-      return res.status(500).json({ success: false, message: 'Failed to save workout program. Please try again.' });
-    }
-
-    console.log(`[ai/save-program] Saved program "${program.name}" (${program.id}) for user ${userId} with ${exercises.length} exercise(s)`);
-
     res.status(201).json({
       success: true,
-      message: 'AI workout program saved successfully.',
-      data:    program,
+      message: 'AI workout plan saved successfully.',
+      data:    materializeGeneratedWorkoutPlan(savedPlan),
     });
 
   } catch (error: any) {
     console.error('[Route] /save-program error:', error?.message ?? error);
     res.status(500).json({
       success: false,
-      message: 'Failed to save workout program. Please try again.',
+      message: 'Failed to save workout plan. Please try again.',
       error:   process.env.NODE_ENV !== 'production' ? error?.message : undefined,
     });
   }
@@ -400,36 +440,23 @@ router.get('/saved-program', requireAuth, async (req: Request, res: Response) =>
 
     const userId = req.user.id;
 
-    const program = await prisma.program.findFirst({
-      where:   { userId, type: 'ai_generated' },
+    const savedPlan = await prisma.generatedWorkoutPlan.findFirst({
+      where:   { userId, isActive: true },
       orderBy: { updatedAt: 'desc' },
-      include: {
-        weeks: {
-          include: {
-            days: {
-              include: {
-                exercises: {
-                  orderBy: { orderIndex: 'asc' },
-                },
-              },
-            },
-          },
-        },
-      },
     });
 
-    if (!program) {
+    if (!savedPlan) {
       return res.status(404).json({
         success: false,
-        message: 'No AI-generated program found. Generate a workout plan first.',
+        message: 'No AI-generated workout plan found. Generate a workout plan first.',
       });
     }
 
-    res.json({ success: true, data: program });
+    res.json({ success: true, data: materializeGeneratedWorkoutPlan(savedPlan) });
 
   } catch (error: any) {
     console.error('[Route] /saved-program error:', error?.message ?? error);
-    res.status(500).json({ success: false, message: 'Failed to fetch saved program.' });
+    res.status(500).json({ success: false, message: 'Failed to fetch saved workout plan.' });
   }
 });
 
