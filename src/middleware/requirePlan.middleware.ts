@@ -22,33 +22,24 @@ export function requirePlan(requiredPlan: PlanSlug) {
         include: { plan: true },
       });
 
-      if (!subscription) {
-        res.status(403).json({ error: 'Subscription required.', code: 'NO_SUBSCRIPTION', requiredPlan });
-        return;
+      if (subscription) {
+        req.activeSubscription = buildSubscriptionPayload(subscription);
+
+        if (subscription.status === 'GRACE_PERIOD') {
+          res.setHeader('X-Subscription-Warning', 'GRACE_PERIOD');
+        }
+      } else {
+        res.setHeader('X-FlowFit-Free-Access', 'true');
       }
 
-      const userPlanSlug = subscription.plan.slug as PlanSlug;
-      if (!planMeetsRequirement(userPlanSlug, requiredPlan)) {
-        res.status(403).json({
-          error:      `This feature requires the ${requiredPlan} plan or higher.`,
-          code:       'PLAN_INSUFFICIENT',
-          currentPlan: userPlanSlug,
-          requiredPlan,
-          upgradeUrl: '/subscription',
-        });
-        return;
-      }
-
-      req.activeSubscription = buildSubscriptionPayload(subscription);
-
-      if (subscription.status === 'GRACE_PERIOD') {
-        res.setHeader('X-Subscription-Warning', 'GRACE_PERIOD');
-      }
-
+      // FlowFit is currently free-access: keep subscription records/payment process intact,
+      // but do not block protected features by plan.
       next();
     } catch (err) {
       console.error('[requirePlan] DB error:', err);
-      res.status(500).json({ error: 'Failed to verify subscription.' });
+      // Free-access mode should not break user features because subscription lookup failed.
+      res.setHeader('X-FlowFit-Subscription-Check', 'skipped');
+      next();
     }
   };
 }
