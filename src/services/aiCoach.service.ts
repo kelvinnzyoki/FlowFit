@@ -285,6 +285,32 @@ function weeksAgo(n: number): Date {
 
 class AICoachService {
 
+  private classifyAnswerMode(message: string): 'short' | 'balanced' | 'detailed' {
+    const clean = message.trim().toLowerCase();
+    const words = clean.split(/\s+/).filter(Boolean).length;
+    const asksForDepth = /(plan|program|routine|schedule|diet|meal plan|weekly|steps|explain|breakdown|analyse|analyze|why|how do i|how can i|strategy)/i.test(clean);
+    const shortAsk = words <= 9 || /^(hi|hello|thanks|ok|okay|yes|no|is|are|can|should|do|does|which|what is)\b/i.test(clean);
+
+    if (asksForDepth) return 'detailed';
+    if (shortAsk) return 'short';
+    return 'balanced';
+  }
+
+  private polishDirectReply(reply: string, mode: 'short' | 'balanced' | 'detailed'): string {
+    const clean = reply.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (!clean) return 'How can I help with your training today?';
+
+    if (mode !== 'short') return clean;
+
+    const sentences = clean
+      .replace(/\n+/g, ' ')
+      .split(/(?<=[.!?])\s+/)
+      .filter(Boolean);
+    const short = sentences.slice(0, 2).join(' ');
+    const words = short.split(/\s+/).filter(Boolean);
+    return words.length > 55 ? `${words.slice(0, 55).join(' ')}.` : short;
+  }
+
   // PUBLIC ENTRY POINT
   async getResponse(
     userId:  string,
@@ -303,8 +329,9 @@ class AICoachService {
       await this.storeEmbedding(userId, message, embedding);
       const similar = await this.semanticSearch(userId, embedding);
 
-      const llm = await this.callLLM(message, ctx, memory, similar);
-      const result = await this.execute(llm, userId, ctx, memory);
+      const answerMode = this.classifyAnswerMode(message);
+      const llm = await this.callLLM(message, ctx, memory, similar, answerMode);
+      const result = await this.execute(llm, userId, ctx, memory, answerMode);
 
       this.updateBehavior(memory, message);
       memory.lastTool = llm.tool?.name;
@@ -662,7 +689,7 @@ class AICoachService {
 
   // GROQ LLM CALL
   private async callLLM(
-    message: string, ctx: UserContext, memory: ConversationMemory, similar: string[],
+    message: string, ctx: UserContext, memory: ConversationMemory, similar: string[], answerMode: 'short' | 'balanced' | 'detailed',
   ): Promise<LLMStructured> {
     const contextBlock = this.formatContextBlock(ctx, memory);
 
@@ -725,6 +752,13 @@ PSYCHOLOGICAL COACHING:
 - Never shame missed sessions — reframe as data
 - Use the athlete's name (${ctx.name}) naturally but not every message
 
+━━ CURRENT ANSWER MODE ━━
+Answer mode for this message: ${answerMode}.
+- short: answer in 1-2 tight sentences. No lists unless absolutely necessary.
+- balanced: answer directly, then give 1-3 practical next steps only if useful.
+- detailed: use clean sections in the tool output or reply, with spaced paragraphs and bullets.
+- Never make a simple yes/no/form question long. Never make a plan question shallow.
+
 ━━ RESPONSE FORMAT — NON-NEGOTIABLE ━━
 - ALWAYS answer what the athlete ACTUALLY ASKED — never redirect to nutrition unless they asked about it
 - PROGRAM RULE: When the athlete has an active program, ALWAYS use it as the primary input for any workout question. Use next_workout for "what's my workout / today / next session" questions. Use generate_workout for "give me a workout / recommend something / what should I do" — it will automatically incorporate the program. Never show a generic blueprint-only workout when a program is enrolled.
@@ -767,7 +801,7 @@ Never invent data. Always reference real numbers from context. "response" is alw
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` },
       body: JSON.stringify({
-        model: GROQ_MODEL, temperature: 0.25, max_completion_tokens: 700,
+        model: GROQ_MODEL, temperature: 0.18, max_completion_tokens: 950,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: systemPrompt },
@@ -804,8 +838,8 @@ Never invent data. Always reference real numbers from context. "response" is alw
   }
 
   // EXECUTION
-  private async execute(llm: LLMStructured, userId: string, ctx: UserContext, memory: ConversationMemory): Promise<CoachResponse> {
-    const base = llm.response ?? 'How can I help with your training today?';
+  private async execute(llm: LLMStructured, userId: string, ctx: UserContext, memory: ConversationMemory, answerMode: 'short' | 'balanced' | 'detailed'): Promise<CoachResponse> {
+    const base = this.polishDirectReply(llm.response ?? 'How can I help with your training today?', answerMode);
     if (!llm.tool) return { success: true, reply: base };
     const tool = await this.executeTool(llm.tool, userId, ctx, memory);
     return { success: true, reply: tool.reply || base, data: tool.data };
