@@ -118,6 +118,7 @@ model User {
   nutritionLogs  NutritionLog[]
   feedback Feedback[]
   programEnrollmentUsages ProgramEnrollmentUsage[]
+  generatedWorkoutPlans GeneratedWorkoutPlan[]
 
   @@map("users")
 }
@@ -492,6 +493,28 @@ model Program {
   @@index([userId])
   @@index([type])
   @@map("programs")
+}
+
+
+model GeneratedWorkoutPlan {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  category    String   @default("general_fitness")
+  difficulty  String   @default("intermediate")
+  metadata    Json     @default("{}")
+  exercises   Json     @default("[]")
+
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, isActive])
+  @@map("generated_workout_plans")
 }
 
 model Week {
