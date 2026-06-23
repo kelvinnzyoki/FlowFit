@@ -278,7 +278,7 @@ router.post('/coach', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!req.user?.id) return res.status(401).json({ success: false, message: 'Authentication required' });
 
-    const { message, currentExercise } = req.body;
+    const { message, currentExercise, responseStyle } = req.body;
 
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
       return res.status(400).json({ success: false, message: 'Message is required' });
@@ -292,7 +292,8 @@ router.post('/coach', requireAuth, async (req: Request, res: Response) => {
     const response = await aiCoach.getResponse(req.user.id, cleanMessage, {
       userId:          req.user.id,
       currentExercise: currentExercise ?? undefined,
-    });
+      responseStyle: typeof responseStyle === 'string' ? responseStyle : undefined,
+    } as any);
 
     if (response?.success && typeof response.reply === 'string' && response.reply.trim()) {
       await appendCoachExchange(req.user.id, cleanMessage, response.reply);
