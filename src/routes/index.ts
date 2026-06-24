@@ -78,7 +78,7 @@ router.use('/exercises',      workoutRoutes);
 router.use('/programs',      programRoutes);
 router.use('/progress',      progressRoutes);
 router.use('/users',         userRoutes);
-router.use('/subscriptions', subscriptionRoutes);
+//router.use('/subscriptions', subscriptionRoutes);
 router.use('/ai', aiRoutes);
 router.use('/feedback', feedbackRoutes);
 router.use('/admin', adminRoutes);
